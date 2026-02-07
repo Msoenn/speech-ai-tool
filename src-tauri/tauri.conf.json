@@ -20,13 +20,9 @@
         "fullscreen": false
       }
     ],
+    "macOSPrivateApi": true,
     "security": {
       "csp": null
-    },
-    "trayIcon": {
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": true,
-      "tooltip": "Speech AI Tool"
     }
   },
   "bundle": {

@@ -3,12 +3,24 @@ import StatusIndicator from "./components/StatusIndicator";
 import TranscriptionView from "./components/TranscriptionView";
 import HistoryList from "./components/HistoryList";
 import SettingsPage from "./components/SettingsPage";
+import StatusOverlay from "./components/StatusOverlay";
 import { useAppState } from "./hooks/useAppState";
 import { isWhisperModelLoaded } from "./lib/commands";
 
-type Page = "main" | "settings";
+const isOverlay =
+  new URLSearchParams(window.location.search).get("window") === "overlay";
 
 export default function App() {
+  if (isOverlay) {
+    return <StatusOverlay />;
+  }
+
+  return <Dashboard />;
+}
+
+type Page = "main" | "settings";
+
+function Dashboard() {
   const { status, rawText, cleanedText, error } = useAppState();
   const [page, setPage] = useState<Page>("main");
   const [modelLoaded, setModelLoaded] = useState(true);

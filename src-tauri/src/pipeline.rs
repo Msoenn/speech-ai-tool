@@ -4,6 +4,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::error::AppError;
 use crate::history::TranscriptionRecord;
 use crate::settings::WhisperMode;
+use crate::tray;
 use crate::AppState;
 
 #[derive(Debug, Clone, Serialize)]
@@ -35,6 +36,7 @@ pub async fn run_pipeline(app: AppHandle) -> Result<(), AppError> {
     let start_time = std::time::Instant::now();
 
     // 1. Stop recording and get WAV bytes
+    tray::set_tray_status(&app, "processing");
     emit_status(
         &app,
         &PipelineStatusEvent {
@@ -66,6 +68,8 @@ pub async fn run_pipeline(app: AppHandle) -> Result<(), AppError> {
     };
 
     if raw_text.trim().is_empty() {
+        tray::set_tray_status(&app, "idle");
+        tray::hide_overlay(&app);
         emit_status(
             &app,
             &PipelineStatusEvent {
@@ -100,6 +104,7 @@ pub async fn run_pipeline(app: AppHandle) -> Result<(), AppError> {
     // 4. Output
     crate::output::copy_and_paste(&app, &cleaned_text, settings.auto_paste, &settings.paste_shortcut)?;
 
+    tray::set_tray_status(&app, "done");
     emit_status(
         &app,
         &PipelineStatusEvent {
@@ -109,6 +114,14 @@ pub async fn run_pipeline(app: AppHandle) -> Result<(), AppError> {
             error: None,
         },
     );
+
+    // Reset tray and hide overlay after 2 seconds
+    let app_for_reset = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        tray::set_tray_status(&app_for_reset, "idle");
+        tray::hide_overlay(&app_for_reset);
+    });
 
     // 5. Save to history
     let record = TranscriptionRecord {

@@ -23,6 +23,19 @@ body {
     Ubuntu, Cantarell, sans-serif;
 }
 
+/* Overlay window: no default bg, content controls everything */
+html.overlay-window,
+html.overlay-window body {
+  background: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+html.overlay-window #root {
+  height: 100vh;
+  width: 100vw;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
 }

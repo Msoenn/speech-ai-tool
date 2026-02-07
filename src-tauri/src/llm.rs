@@ -30,20 +30,20 @@ pub struct LlmConfig {
 pub fn default_few_shot_examples() -> Vec<FewShotExample> {
     vec![
         FewShotExample {
-            input: "so um basically I think we should uh we should go with the first option you know".to_string(),
-            output: "I think we should go with the first option.".to_string(),
+            input: "so um basically I think we should uh we should go with the pasta tonight you know".to_string(),
+            output: "I think we should go with the pasta tonight.".to_string(),
         },
         FewShotExample {
-            input: "so I was talking to Mike and he said that basically the deadline is uh gonna be pushed back by like two weeks because you know the design team needs more time and I think thats fine but we should let the client know".to_string(),
-            output: "I was talking to Mike and he said that the deadline is gonna be pushed back by two weeks because the design team needs more time. I think that's fine, but we should let the client know.".to_string(),
+            input: "so I was talking to Sarah and she said that basically the weather is uh gonna be really nice this weekend like maybe seventy five degrees and I think we should you know go to the park or something".to_string(),
+            output: "I was talking to Sarah and she said that the weather is gonna be really nice this weekend, maybe seventy-five degrees. I think we should go to the park or something.".to_string(),
         },
         FewShotExample {
-            input: "okay so first we need to uh set up the database second we need to like write the API endpoints and third um we need to build the frontend".to_string(),
-            output: "First, we need to set up the database. Second, we need to write the API endpoints. Third, we need to build the frontend.".to_string(),
+            input: "okay so first I need to uh pick up the groceries second I need to like drop off the dry cleaning and third um I have to get gas on the way home".to_string(),
+            output: "First, I need to pick up the groceries. Second, I need to drop off the dry cleaning. Third, I have to get gas on the way home.".to_string(),
         },
         FewShotExample {
-            input: "Hello world.".to_string(),
-            output: "Hello world.".to_string(),
+            input: "The quick brown fox jumped over the lazy dog.".to_string(),
+            output: "The quick brown fox jumped over the lazy dog.".to_string(),
         },
     ]
 }
@@ -104,11 +104,11 @@ pub async fn cleanup_text(config: &LlmConfig, raw_text: &str) -> Result<String, 
         },
     ];
 
-    // Add few-shot examples from config
+    // Add few-shot examples from config, wrapped in tags
     for example in &config.few_shot_examples {
         messages.push(ChatMessage {
             role: "user".to_string(),
-            content: example.input.clone(),
+            content: format!("<transcription>{}</transcription>", example.input),
         });
         messages.push(ChatMessage {
             role: "assistant".to_string(),
@@ -116,10 +116,10 @@ pub async fn cleanup_text(config: &LlmConfig, raw_text: &str) -> Result<String, 
         });
     }
 
-    // Actual transcription to clean
+    // Actual transcription to clean, same tag format
     messages.push(ChatMessage {
         role: "user".to_string(),
-        content: raw_text.to_string(),
+        content: format!("<transcription>{}</transcription>", raw_text),
     });
 
     match config.api_type {

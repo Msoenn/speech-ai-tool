@@ -6,6 +6,7 @@ mod llm;
 mod output;
 mod pipeline;
 mod settings;
+mod sounds;
 mod tray;
 mod whisper;
 
@@ -13,6 +14,7 @@ use audio::AudioRecorder;
 use error::AppError;
 use history::HistoryDb;
 use settings::AppSettings;
+use sounds::SoundPlayer;
 use std::sync::Mutex;
 use tauri::Manager;
 use tauri_plugin_store::StoreExt;
@@ -23,6 +25,7 @@ pub struct AppState {
     pub whisper: WhisperEngine,
     pub settings: Mutex<AppSettings>,
     pub history: HistoryDb,
+    pub sound_player: SoundPlayer,
 }
 
 // --- Audio commands ---
@@ -247,6 +250,7 @@ pub fn run() {
                 whisper: whisper_engine,
                 settings: Mutex::new(loaded_settings.clone()),
                 history: history_db,
+                sound_player: SoundPlayer::new(),
             });
 
             // Register hotkey
