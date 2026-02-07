@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create draft release
+        id: create
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          name: "Speech AI Tool ${{ github.ref_name }}"
+
+  build-and-upload:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            rust-targets: ""
+            args: ""
+          - platform: macos-latest
+            rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+            args: "--target universal-apple-darwin"
+          - platform: windows-latest
+            rust-targets: ""
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake clang libasound2-dev libwebkit2gtk-4.1-dev \
+            libgtk-3-dev libayatana-appindicator3-dev libssl-dev \
+            librsvg2-dev libjavascriptcoregtk-4.1-dev libxdo-dev
+
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: brew install cmake
+
+      - name: Install Windows dependencies
+        if: runner.os == 'Windows'
+        run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: pnpm
+
+      - run: pnpm install
+
+      - name: Build and upload to release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: ${{ matrix.args }}
+          tauriScript: pnpm tauri
+
+  publish-release:
+    needs: [create-release, build-and-upload]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ needs.create-release.outputs.release_id }},
+              draft: false
+            });
