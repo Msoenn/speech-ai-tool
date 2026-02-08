@@ -33,6 +33,7 @@ jobs:
           - platform: ubuntu-22.04
             args: '--features cuda --config ''{"productName":"Speech AI Tool CUDA"}'''
             cuda: true
+            rustflags: "-C linker=cc"
           - platform: macos-latest
             rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
             args: "--target universal-apple-darwin"
@@ -86,6 +87,9 @@ jobs:
         with:
           cuda: '12.6.3'
           method: 'network'
+          sub-packages: '["nvcc","cudart","cublas","cublas_dev","thrust"]'
+          use-github-cache: false
+          use-local-cache: false
 
       - name: Build and upload to release
         uses: tauri-apps/tauri-action@v0
@@ -95,6 +99,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Disable -march=native in whisper.cpp so CI builds run on all x86_64 CPUs
           WHISPER_NATIVE: "OFF"
+          RUSTFLAGS: ${{ matrix.rustflags || '' }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
