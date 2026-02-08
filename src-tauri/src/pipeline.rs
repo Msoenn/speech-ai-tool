@@ -56,12 +56,13 @@ pub async fn run_pipeline(app: AppHandle) -> Result<(), AppError> {
     let settings = state.settings.lock().unwrap().clone();
 
     let raw_text = match settings.whisper_mode {
-        WhisperMode::Local => state.whisper.transcribe(&wav_bytes)?,
+        WhisperMode::Local => state.whisper.transcribe(&wav_bytes, &settings.whisper_language)?,
         WhisperMode::Api => {
             crate::whisper::transcribe_via_api(
                 &settings.whisper_api_endpoint,
                 &settings.whisper_api_key,
                 &wav_bytes,
+                &settings.whisper_language,
             )
             .await?
         }

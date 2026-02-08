@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { getSettings, saveSettings as saveSettingsCmd } from "../lib/commands";
+import { getSettings, saveSettings as saveSettingsCmd, resetSettings as resetSettingsCmd } from "../lib/commands";
 import type { AppSettings } from "../lib/types";
 
 export function useSettings() {
@@ -32,5 +32,15 @@ export function useSettings() {
     [],
   );
 
-  return { settings, loading, error, saveSettings };
+  const resetSettings = useCallback(async () => {
+    try {
+      const defaults = await resetSettingsCmd();
+      setSettings(defaults);
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, []);
+
+  return { settings, loading, error, saveSettings, resetSettings };
 }

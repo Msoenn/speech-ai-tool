@@ -5,6 +5,7 @@ import { useTauriEvent } from "../hooks/useTauriEvent";
 interface ModelInfo {
   name: string;
   size: string;
+  description: string;
   downloaded: boolean;
 }
 
@@ -96,14 +97,17 @@ export default function ModelDownload({ currentModel, onModelLoaded }: ModelDown
               }`}
             >
               <div>
-                <span className="text-sm text-text font-medium">{model.name}</span>
-                <span className="text-xs text-text-muted ml-2">{model.size}</span>
-                {isLoaded && (
-                  <span className="text-xs text-accent ml-2">(loaded)</span>
-                )}
-                {model.downloaded && !isLoaded && (
-                  <span className="text-xs text-success ml-2">(downloaded)</span>
-                )}
+                <div>
+                  <span className="text-sm text-text font-medium">{model.name}</span>
+                  <span className="text-xs text-text-muted ml-2">{model.size}</span>
+                  {isLoaded && (
+                    <span className="text-xs text-accent ml-2">(loaded)</span>
+                  )}
+                  {model.downloaded && !isLoaded && (
+                    <span className="text-xs text-success ml-2">(downloaded)</span>
+                  )}
+                </div>
+                <div className="text-xs text-text-muted">{model.description}</div>
               </div>
 
               <div className="flex gap-2">

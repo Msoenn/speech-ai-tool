@@ -75,7 +75,8 @@ fn transcribe_audio(
     state: tauri::State<'_, AppState>,
     wav_bytes: Vec<u8>,
 ) -> Result<String, AppError> {
-    state.whisper.transcribe(&wav_bytes)
+    let language = state.settings.lock().unwrap().whisper_language.clone();
+    state.whisper.transcribe(&wav_bytes, &language)
 }
 
 #[tauri::command]

@@ -14,6 +14,7 @@ export interface AudioDevice {
 export interface WhisperModel {
   name: string;
   size: string;
+  description: string;
   downloaded: boolean;
   path?: string;
 }
@@ -45,6 +46,7 @@ export interface AppSettings {
   hotkey: string;
   whisper_mode: "local" | "api";
   whisper_model: string;
+  whisper_language: string;
   whisper_api_endpoint: string;
   whisper_api_key: string;
   llm: LlmConfig;

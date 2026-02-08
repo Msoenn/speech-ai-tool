@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useSettings } from "../hooks/useSettings";
 import AudioDeviceSelect from "./AudioDeviceSelect";
 import HotkeyInput from "./HotkeyInput";
@@ -10,7 +11,8 @@ interface SettingsPageProps {
 }
 
 export default function SettingsPage({ onBack }: SettingsPageProps) {
-  const { settings, loading, error, saveSettings } = useSettings();
+  const { settings, loading, error, saveSettings, resetSettings } = useSettings();
+  const [confirmReset, setConfirmReset] = useState(false);
 
   if (loading || !settings) {
     return <p className="text-text-muted text-sm">Loading settings...</p>;
@@ -111,6 +113,37 @@ export default function SettingsPage({ onBack }: SettingsPageProps) {
             className="w-24 bg-bg border border-primary rounded px-3 py-2 text-text text-sm focus:outline-none focus:ring-1 focus:ring-accent"
           />
         </div>
+      </section>
+
+      {/* Reset */}
+      <section className="bg-surface rounded-lg p-4">
+        {!confirmReset ? (
+          <button
+            onClick={() => setConfirmReset(true)}
+            className="px-4 py-2 text-sm text-error bg-error/10 rounded hover:bg-error/20 transition-colors"
+          >
+            Reset All Settings
+          </button>
+        ) : (
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-warning">This will reset all settings to defaults. Are you sure?</span>
+            <button
+              onClick={() => {
+                resetSettings();
+                setConfirmReset(false);
+              }}
+              className="px-3 py-1 text-sm text-white bg-error rounded hover:bg-red-700 transition-colors"
+            >
+              Confirm
+            </button>
+            <button
+              onClick={() => setConfirmReset(false)}
+              className="px-3 py-1 text-sm text-text-muted hover:text-text transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
       </section>
     </div>
   );

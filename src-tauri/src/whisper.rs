@@ -6,12 +6,11 @@ use tauri::{AppHandle, Emitter};
 
 use crate::error::AppError;
 
-const WHISPER_MODELS: &[(&str, &str, &str)] = &[
-    ("tiny", "75 MB", "ggml-tiny.bin"),
-    ("base", "142 MB", "ggml-base.bin"),
-    ("small", "466 MB", "ggml-small.bin"),
-    ("medium", "1.5 GB", "ggml-medium.bin"),
-    ("large-v3-turbo", "1.6 GB", "ggml-large-v3-turbo.bin"),
+const WHISPER_MODELS: &[(&str, &str, &str, &str)] = &[
+    ("tiny-q5_1", "32 MB", "ggml-tiny-q5_1.bin", "Fastest — for older or low-end hardware"),
+    ("small-q5_1", "190 MB", "ggml-small-q5_1.bin", "Balanced — good for most laptops"),
+    ("large-v3-turbo-q5_0", "574 MB", "ggml-large-v3-turbo-q5_0.bin", "Recommended — best quality/speed ratio"),
+    ("large-v3-turbo", "1.6 GB", "ggml-large-v3-turbo.bin", "Maximum quality — needs 4GB+ RAM"),
 ];
 
 fn huggingface_url(filename: &str) -> String {
@@ -34,6 +33,7 @@ pub fn get_models_dir() -> Result<PathBuf, AppError> {
 pub struct WhisperModelInfo {
     pub name: String,
     pub size: String,
+    pub description: String,
     pub downloaded: bool,
     pub path: Option<String>,
 }
@@ -42,12 +42,13 @@ pub fn list_models() -> Result<Vec<WhisperModelInfo>, AppError> {
     let models_dir = get_models_dir()?;
     let mut result = Vec::new();
 
-    for &(name, size, filename) in WHISPER_MODELS {
+    for &(name, size, filename, description) in WHISPER_MODELS {
         let path = models_dir.join(filename);
         let downloaded = path.exists();
         result.push(WhisperModelInfo {
             name: name.to_string(),
             size: size.to_string(),
+            description: description.to_string(),
             downloaded,
             path: if downloaded {
                 Some(path.to_string_lossy().into_owned())
@@ -61,9 +62,9 @@ pub fn list_models() -> Result<Vec<WhisperModelInfo>, AppError> {
 }
 
 pub async fn download_model(app: AppHandle, model_name: &str) -> Result<(), AppError> {
-    let (_, _, filename) = WHISPER_MODELS
+    let (_, _, filename, _) = WHISPER_MODELS
         .iter()
-        .find(|(name, _, _)| *name == model_name)
+        .find(|(name, _, _, _)| *name == model_name)
         .ok_or_else(|| AppError::Whisper(format!("Unknown model: {}", model_name)))?;
 
     let models_dir = get_models_dir()?;
@@ -137,9 +138,9 @@ impl WhisperEngine {
     }
 
     pub fn load_model(&self, model_name: &str) -> Result<(), AppError> {
-        let (_, _, filename) = WHISPER_MODELS
+        let (_, _, filename, _) = WHISPER_MODELS
             .iter()
-            .find(|(name, _, _)| *name == model_name)
+            .find(|(name, _, _, _)| *name == model_name)
             .ok_or_else(|| AppError::Whisper(format!("Unknown model: {}", model_name)))?;
 
         let models_dir = get_models_dir()?;
@@ -162,7 +163,7 @@ impl WhisperEngine {
         Ok(())
     }
 
-    pub fn transcribe(&self, wav_bytes: &[u8]) -> Result<String, AppError> {
+    pub fn transcribe(&self, wav_bytes: &[u8], language: &str) -> Result<String, AppError> {
         let guard = self.ctx.lock().unwrap();
         let ctx = guard
             .as_ref()
@@ -176,7 +177,11 @@ impl WhisperEngine {
 
         let mut params = whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
         params.set_n_threads(num_cpus::get() as i32);
-        params.set_language(Some("en"));
+        if language == "auto" {
+            params.set_language(None);
+        } else {
+            params.set_language(Some(language));
+        }
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);
@@ -204,6 +209,7 @@ pub async fn transcribe_via_api(
     endpoint: &str,
     api_key: &str,
     wav_bytes: &[u8],
+    language: &str,
 ) -> Result<String, AppError> {
     let url = format!(
         "{}/v1/audio/transcriptions",
@@ -215,9 +221,13 @@ pub async fn transcribe_via_api(
         .mime_str("audio/wav")
         .map_err(|e| AppError::Whisper(e.to_string()))?;
 
-    let form = reqwest::multipart::Form::new()
+    let mut form = reqwest::multipart::Form::new()
         .part("file", part)
         .text("model", "whisper-1");
+
+    if language != "auto" {
+        form = form.text("language", language.to_string());
+    }
 
     let client = reqwest::Client::new();
     let mut req = client.post(&url).multipart(form);

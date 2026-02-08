@@ -21,7 +21,7 @@ export async function loadWhisperModel(modelName: string): Promise<void> {
   return invoke("load_whisper_model", { modelName });
 }
 
-export async function listWhisperModels(): Promise<{ name: string; size: string; downloaded: boolean }[]> {
+export async function listWhisperModels(): Promise<{ name: string; size: string; description: string; downloaded: boolean }[]> {
   return invoke("list_whisper_models");
 }
 

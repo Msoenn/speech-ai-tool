@@ -8,6 +8,8 @@ pub struct AppSettings {
     pub hotkey: String,
     pub whisper_mode: WhisperMode,
     pub whisper_model: String,
+    #[serde(default = "default_whisper_language")]
+    pub whisper_language: String,
     pub whisper_api_endpoint: String,
     pub whisper_api_key: String,
     pub llm: LlmConfig,
@@ -15,6 +17,10 @@ pub struct AppSettings {
     #[serde(default = "default_paste_shortcut")]
     pub paste_shortcut: String,
     pub history_max_items: usize,
+}
+
+pub fn default_whisper_language() -> String {
+    "en".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -44,7 +50,8 @@ impl Default for AppSettings {
                 "ControlLeft+ShiftLeft+Space".to_string()
             },
             whisper_mode: WhisperMode::Local,
-            whisper_model: "small".to_string(),
+            whisper_model: "large-v3-turbo-q5_0".to_string(),
+            whisper_language: default_whisper_language(),
             whisper_api_endpoint: String::new(),
             whisper_api_key: String::new(),
             llm: LlmConfig::default(),
@@ -65,6 +72,14 @@ pub fn load_settings(store: &tauri_plugin_store::Store<tauri::Wry>) -> AppSettin
     if crate::hotkey::needs_migration(&settings.hotkey) {
         settings.hotkey = crate::hotkey::migrate_hotkey_format(&settings.hotkey);
     }
+
+    // Migrate old model names to curated quantized variants
+    settings.whisper_model = match settings.whisper_model.as_str() {
+        "tiny" | "base" => "tiny-q5_1".to_string(),
+        "small" => "small-q5_1".to_string(),
+        "medium" => "large-v3-turbo-q5_0".to_string(),
+        _ => settings.whisper_model,
+    };
 
     settings
 }
