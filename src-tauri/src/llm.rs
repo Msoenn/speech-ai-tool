@@ -2,6 +2,29 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
+/// LLMs sometimes wrap their response in XML tags (e.g. `<cleaned>...</cleaned>`)
+/// mimicking the `<transcription>` tags in the input. Extract the inner content
+/// of the first such tag pair, or return the original text if no tags found.
+fn extract_from_tags(text: &str) -> String {
+    if let Some(start_end) = text.find('>') {
+        // Look for any <tag>...</tag> pattern
+        if let Some(open_start) = text.find('<') {
+            if open_start < start_end {
+                let tag_content = &text[open_start + 1..start_end];
+                // Ignore if it looks like a self-closing or malformed tag
+                if !tag_content.is_empty() && !tag_content.starts_with('/') {
+                    let close_tag = format!("</{}>", tag_content);
+                    if let Some(close_pos) = text.find(&close_tag) {
+                        let inner = &text[start_end + 1..close_pos];
+                        return inner.trim().to_string();
+                    }
+                }
+            }
+        }
+    }
+    text.to_string()
+}
+
 pub const DEFAULT_SYSTEM_PROMPT: &str = "Remove filler words (um, uh, like, you know, basically, I mean, so, right, okay) and fix punctuation. Do not rephrase, summarize, or rewrite. Keep the speakers original words and sentence structure. Output only the result.";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,7 +172,7 @@ pub async fn cleanup_text(config: &LlmConfig, raw_text: &str) -> Result<String, 
                 .await
                 .map_err(|e| AppError::Llm(format!("Parse error: {}", e)))?;
 
-            Ok(parsed.message.content.trim().to_string())
+            Ok(extract_from_tags(parsed.message.content.trim()))
         }
         ApiType::OpenAI => {
             let url = format!(
@@ -182,7 +205,7 @@ pub async fn cleanup_text(config: &LlmConfig, raw_text: &str) -> Result<String, 
             parsed
                 .choices
                 .first()
-                .map(|c| c.message.content.trim().to_string())
+                .map(|c| extract_from_tags(c.message.content.trim()))
                 .ok_or_else(|| AppError::Llm("No response from LLM".into()))
         }
     }
