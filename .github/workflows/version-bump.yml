@@ -12,9 +12,9 @@ on:
         required: true
         type: choice
         options:
+          - major
           - minor
           - patch
-          - major
         default: patch
 
 permissions:
