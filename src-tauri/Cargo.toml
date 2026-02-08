@@ -1,6 +1,6 @@
 [package]
 name = "speech-ai-tool"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "GPL-3.0-only"
 
@@ -35,6 +35,9 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 rodio = { version = "0.19", default-features = false, features = ["wav"] }
+
+[features]
+cuda = ["whisper-rs/cuda"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
