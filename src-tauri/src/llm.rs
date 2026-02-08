@@ -6,16 +6,20 @@ use crate::error::AppError;
 /// mimicking the `<transcription>` tags in the input. Extract the inner content
 /// of the first such tag pair, or return the original text if no tags found.
 fn extract_from_tags(text: &str) -> String {
-    if let Some(start_end) = text.find('>') {
-        // Look for any <tag>...</tag> pattern
-        if let Some(open_start) = text.find('<') {
-            if open_start < start_end {
-                let tag_content = &text[open_start + 1..start_end];
-                // Ignore if it looks like a self-closing or malformed tag
-                if !tag_content.is_empty() && !tag_content.starts_with('/') {
-                    let close_tag = format!("</{}>", tag_content);
-                    if let Some(close_pos) = text.find(&close_tag) {
-                        let inner = &text[start_end + 1..close_pos];
+    if let Some(open_start) = text.find('<') {
+        if let Some(rel_end) = text[open_start..].find('>') {
+            let start_end = open_start + rel_end;
+            let tag_content = &text[open_start + 1..start_end];
+            if !tag_content.is_empty() && !tag_content.starts_with('/') {
+                // Extract tag name only (ignore attributes)
+                let tag_name = tag_content
+                    .split(|c: char| c.is_whitespace() || c == '/')
+                    .next()
+                    .unwrap();
+                if !tag_name.is_empty() {
+                    let close_tag = format!("</{}>", tag_name);
+                    if let Some(rel_close) = text[start_end + 1..].find(&close_tag) {
+                        let inner = &text[start_end + 1..start_end + 1 + rel_close];
                         return inner.trim().to_string();
                     }
                 }
