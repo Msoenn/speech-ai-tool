@@ -15,11 +15,11 @@ fn extract_from_tags(text: &str) -> String {
                 let tag_name = tag_content
                     .split(|c: char| c.is_whitespace() || c == '/')
                     .next()
-                    .unwrap_or("");
+                    .unwrap();
                 if !tag_name.is_empty() {
                     let close_tag = format!("</{}>", tag_name);
-                    if let Some(close_pos) = text.find(&close_tag) {
-                        let inner = &text[start_end + 1..close_pos];
+                    if let Some(rel_close) = text[start_end + 1..].find(&close_tag) {
+                        let inner = &text[start_end + 1..start_end + 1 + rel_close];
                         return inner.trim().to_string();
                     }
                 }
