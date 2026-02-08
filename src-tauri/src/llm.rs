@@ -29,7 +29,7 @@ fn extract_from_tags(text: &str) -> String {
     text.to_string()
 }
 
-pub const DEFAULT_SYSTEM_PROMPT: &str = "Remove filler words (um, uh, like, you know, basically, I mean, so, right, okay) and fix punctuation. Do not rephrase, summarize, or rewrite. Keep the speakers original words and sentence structure. Output only the result.";
+pub const DEFAULT_SYSTEM_PROMPT: &str = "You are a speech-to-text post-processor. Clean up the transcription while preserving the speaker's meaning and voice. Your tasks:\n- Remove filler words (um, uh, like, you know, basically, I mean, so, right, okay)\n- Handle self-corrections by keeping only the final intended version\n- Fix grammar, punctuation, and sentence structure\n- Format with structure: use bullet points or numbered lists when items are enumerated, add paragraph breaks between distinct topics\n- Improve clarity and conciseness without changing the meaning or making it sound robotic\nOutput only the cleaned result.";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -57,16 +57,20 @@ pub struct LlmConfig {
 pub fn default_few_shot_examples() -> Vec<FewShotExample> {
     vec![
         FewShotExample {
-            input: "so um basically I think we should uh we should go with the pasta tonight you know".to_string(),
-            output: "I think we should go with the pasta tonight.".to_string(),
+            input: "so um I was thinking we should meet on Tuesday no wait Wednesday at like 2 PM to go over the uh the project proposal you know".to_string(),
+            output: "I was thinking we should meet on Wednesday at 2 PM to go over the project proposal.".to_string(),
         },
         FewShotExample {
-            input: "so I was talking to Sarah and she said that basically the weather is uh gonna be really nice this weekend like maybe seventy five degrees and I think we should you know go to the park or something".to_string(),
-            output: "I was talking to Sarah and she said that the weather is gonna be really nice this weekend, maybe seventy-five degrees. I think we should go to the park or something.".to_string(),
+            input: "okay so for the grocery store I need um bananas oranges apples and oh also we need like milk and bread and uh some eggs I think".to_string(),
+            output: "Grocery list:\n- Bananas\n- Oranges\n- Apples\n- Milk\n- Bread\n- Eggs".to_string(),
         },
         FewShotExample {
-            input: "okay so first I need to uh pick up the groceries second I need to like drop off the dry cleaning and third um I have to get gas on the way home".to_string(),
-            output: "First, I need to pick up the groceries. Second, I need to drop off the dry cleaning. Third, I have to get gas on the way home.".to_string(),
+            input: "so basically to set up the project you first need to um clone the repo and then you install the dependencies with npm install and then uh you need to create a dot env file with your API key and finally just run npm run dev to start it".to_string(),
+            output: "To set up the project:\n1. Clone the repo\n2. Install dependencies with `npm install`\n3. Create a `.env` file with your API key\n4. Run `npm run dev` to start it".to_string(),
+        },
+        FewShotExample {
+            input: "so the meeting went really well um we decided to launch the new feature next month and uh Sarah is going to handle the design and Mike will do the backend and oh we also need to hire like two more engineers for the mobile team because they're basically swamped right now".to_string(),
+            output: "The meeting went really well. We decided to launch the new feature next month. Sarah is going to handle the design and Mike will do the backend.\n\nWe also need to hire two more engineers for the mobile team because they're swamped right now.".to_string(),
         },
         FewShotExample {
             input: "The quick brown fox jumped over the lazy dog.".to_string(),
