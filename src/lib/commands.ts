@@ -53,6 +53,10 @@ export async function setHotkey(hotkey: string): Promise<void> {
   return invoke("set_hotkey", { hotkey });
 }
 
+export async function pauseHotkey(paused: boolean): Promise<void> {
+  return invoke("pause_hotkey", { paused });
+}
+
 export async function getCurrentHotkey(): Promise<string> {
   return invoke("get_current_hotkey");
 }

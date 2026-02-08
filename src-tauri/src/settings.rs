@@ -38,7 +38,11 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             audio_device_index: None,
-            hotkey: "CmdOrCtrl+Shift+Space".to_string(),
+            hotkey: if cfg!(target_os = "macos") {
+                "MetaLeft+ShiftLeft+Space".to_string()
+            } else {
+                "ControlLeft+ShiftLeft+Space".to_string()
+            },
             whisper_mode: WhisperMode::Local,
             whisper_model: "small".to_string(),
             whisper_api_endpoint: String::new(),
@@ -52,10 +56,17 @@ impl Default for AppSettings {
 }
 
 pub fn load_settings(store: &tauri_plugin_store::Store<tauri::Wry>) -> AppSettings {
-    store
+    let mut settings: AppSettings = store
         .get("settings")
         .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    // Migrate old hotkey format (e.g. "CmdOrCtrl+Shift+Space") to new format
+    if crate::hotkey::needs_migration(&settings.hotkey) {
+        settings.hotkey = crate::hotkey::migrate_hotkey_format(&settings.hotkey);
+    }
+
+    settings
 }
 
 pub fn save_settings(

@@ -13,9 +13,10 @@ mod whisper;
 use audio::AudioRecorder;
 use error::AppError;
 use history::HistoryDb;
+use hotkey::HotkeyState;
 use settings::AppSettings;
 use sounds::SoundPlayer;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri_plugin_store::StoreExt;
 use whisper::WhisperEngine;
@@ -26,6 +27,7 @@ pub struct AppState {
     pub settings: Mutex<AppSettings>,
     pub history: HistoryDb,
     pub sound_player: SoundPlayer,
+    pub hotkey_state: Arc<HotkeyState>,
 }
 
 // --- Audio commands ---
@@ -119,7 +121,15 @@ fn paste_text(app: tauri::AppHandle, text: String) -> Result<(), AppError> {
 
 #[tauri::command]
 fn set_hotkey(app: tauri::AppHandle, hotkey_str: String) -> Result<(), AppError> {
-    hotkey::register_hotkey(&app, &hotkey_str)
+    let state = app.state::<AppState>();
+    hotkey::update_hotkey(&state.hotkey_state, &hotkey_str);
+    Ok(())
+}
+
+#[tauri::command]
+fn pause_hotkey(app: tauri::AppHandle, paused: bool) {
+    let state = app.state::<AppState>();
+    hotkey::set_paused(&state.hotkey_state, paused);
 }
 
 #[tauri::command]
@@ -160,7 +170,7 @@ fn save_settings(
 
     // Apply side effects
     if hotkey_changed {
-        hotkey::register_hotkey(&app, &settings.hotkey)?;
+        hotkey::update_hotkey(&state.hotkey_state, &settings.hotkey);
     }
 
     if model_changed && settings.whisper_mode == settings::WhisperMode::Local {
@@ -183,7 +193,7 @@ fn reset_settings(app: tauri::AppHandle) -> Result<AppSettings, AppError> {
         .map_err(|e| AppError::Settings(e.to_string()))?;
     settings::save_settings(&store, &defaults)?;
 
-    hotkey::register_hotkey(&app, &defaults.hotkey)?;
+    hotkey::update_hotkey(&state.hotkey_state, &defaults.hotkey);
 
     Ok(defaults)
 }
@@ -218,7 +228,6 @@ async fn test_whisper_api(state: tauri::State<'_, AppState>) -> Result<String, A
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             #[cfg(desktop)]
@@ -251,19 +260,17 @@ pub fn run() {
                 }
             }
 
+            // Start the rdev hotkey listener
+            let hotkey_state = hotkey::start_listener(app.handle(), &loaded_settings.hotkey);
+
             app.manage(AppState {
                 recorder: Mutex::new(AudioRecorder::new()),
                 whisper: whisper_engine,
                 settings: Mutex::new(loaded_settings.clone()),
                 history: history_db,
                 sound_player: SoundPlayer::new(),
+                hotkey_state,
             });
-
-            // Register hotkey
-            let app_handle = app.handle().clone();
-            if let Err(e) = hotkey::register_hotkey(&app_handle, &loaded_settings.hotkey) {
-                eprintln!("Failed to register hotkey: {}", e);
-            }
 
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
@@ -287,6 +294,7 @@ pub fn run() {
             paste_text,
             set_hotkey,
             get_current_hotkey,
+            pause_hotkey,
             get_settings,
             save_settings,
             reset_settings,

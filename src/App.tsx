@@ -102,11 +102,8 @@ function Dashboard() {
 
           <div className="bg-surface rounded-lg p-6">
             <p className="text-text-muted text-sm">
-              Press{" "}
-              <kbd className="px-2 py-0.5 bg-primary rounded text-xs">
-                Ctrl+Shift+Space
-              </kbd>{" "}
-              and hold while speaking. Release to transcribe.
+              Press and hold your configured hotkey while speaking. Release to
+              transcribe. You can change the hotkey in Settings.
             </p>
           </div>
 
