@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use rdev::{self, EventType, Key};
+use rdev::{EventType, Key};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::pipeline::{self, PipelineStatus, PipelineStatusEvent};
@@ -30,7 +30,11 @@ impl HotkeyState {
     }
 }
 
-/// Start the rdev global listener thread. Returns shared state for runtime updates.
+/// Start the global key-event listener thread. Returns shared state for runtime updates.
+///
+/// On macOS we use a direct CGEvent tap (see `macos_event_tap`) to avoid
+/// rdev's `TSMGetInputSourceProperty` call, which crashes on macOS 26.3+
+/// when invoked from a background thread.  On other platforms we use `rdev::listen`.
 pub fn start_listener(app: &AppHandle, hotkey_str: &str) -> Arc<HotkeyState> {
     let combo = parse_hotkey_string(hotkey_str);
     let state = Arc::new(HotkeyState::new(combo));
@@ -40,22 +44,28 @@ pub fn start_listener(app: &AppHandle, hotkey_str: &str) -> Arc<HotkeyState> {
     thread::spawn(move || {
         let mut held_keys: HashSet<Key> = HashSet::new();
 
-        let callback = move |event: rdev::Event| {
-            match event.event_type {
-                EventType::KeyPress(key) => {
-                    held_keys.insert(key);
-                    check_combo(&held_keys, &state_clone, &app_handle);
-                }
-                EventType::KeyRelease(key) => {
-                    held_keys.remove(&key);
-                    check_combo(&held_keys, &state_clone, &app_handle);
-                }
-                _ => {}
+        let mut handle_event = move |event_type: EventType| match event_type {
+            EventType::KeyPress(key) => {
+                held_keys.insert(key);
+                check_combo(&held_keys, &state_clone, &app_handle);
             }
+            EventType::KeyRelease(key) => {
+                held_keys.remove(&key);
+                check_combo(&held_keys, &state_clone, &app_handle);
+            }
+            _ => {}
         };
 
-        if let Err(e) = rdev::listen(callback) {
-            eprintln!("rdev listener error: {:?}", e);
+        #[cfg(target_os = "macos")]
+        {
+            crate::macos_event_tap::listen(handle_event);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            if let Err(e) = rdev::listen(move |event| handle_event(event.event_type)) {
+                eprintln!("rdev listener error: {:?}", e);
+            }
         }
     });
 

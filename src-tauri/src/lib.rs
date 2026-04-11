@@ -2,6 +2,8 @@ mod audio;
 mod error;
 mod history;
 mod hotkey;
+#[cfg(target_os = "macos")]
+mod macos_event_tap;
 mod llm;
 mod output;
 mod pipeline;
