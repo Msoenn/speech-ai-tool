@@ -61,6 +61,20 @@ export async function getCurrentHotkey(): Promise<string> {
   return invoke("get_current_hotkey");
 }
 
+// On macOS these gate the global hotkey + auto-paste on the Accessibility
+// permission. On other platforms the backend reports "granted" (no-op).
+export async function checkAccessibilityPermission(): Promise<boolean> {
+  return invoke("check_accessibility_permission");
+}
+
+export async function requestAccessibilityPermission(): Promise<boolean> {
+  return invoke("request_accessibility_permission");
+}
+
+export async function openAccessibilitySettings(): Promise<void> {
+  return invoke("open_accessibility_settings");
+}
+
 export async function getSettings(): Promise<AppSettings> {
   return invoke("get_settings");
 }

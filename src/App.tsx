@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import StatusIndicator from "./components/StatusIndicator";
@@ -7,7 +7,13 @@ import HistoryList from "./components/HistoryList";
 import SettingsPage from "./components/SettingsPage";
 import StatusOverlay from "./components/StatusOverlay";
 import { useAppState } from "./hooks/useAppState";
-import { isWhisperModelLoaded } from "./lib/commands";
+import { useTauriEvent } from "./hooks/useTauriEvent";
+import {
+  isWhisperModelLoaded,
+  checkAccessibilityPermission,
+  requestAccessibilityPermission,
+  openAccessibilitySettings,
+} from "./lib/commands";
 
 const isOverlay =
   new URLSearchParams(window.location.search).get("window") === "overlay";
@@ -28,6 +34,7 @@ function Dashboard() {
   const [modelLoaded, setModelLoaded] = useState(true);
   const [update, setUpdate] = useState<Update | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [permissionOk, setPermissionOk] = useState(true);
 
   useEffect(() => {
     isWhisperModelLoaded().then(setModelLoaded).catch(() => setModelLoaded(false));
@@ -36,6 +43,14 @@ function Dashboard() {
   useEffect(() => {
     check().then((u) => setUpdate(u)).catch(console.error);
   }, []);
+
+  useEffect(() => {
+    checkAccessibilityPermission().then(setPermissionOk).catch(() => {});
+  }, []);
+
+  // The backend emits this when it detects the permission is missing at startup.
+  const onPermissionRequired = useCallback(() => setPermissionOk(false), []);
+  useTauriEvent<string>("permission-required", onPermissionRequired);
 
   if (page === "settings") {
     return (
@@ -64,6 +79,46 @@ function Dashboard() {
         </div>
 
         <div className="space-y-6">
+          {!permissionOk && (
+            <div className="bg-error/10 border border-error text-error text-sm rounded-lg px-4 py-3 space-y-2">
+              <p>
+                Accessibility permission is required for the global hotkey and
+                auto-paste to work. Grant it below, then relaunch the app.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={async () => {
+                    await requestAccessibilityPermission();
+                    await openAccessibilitySettings();
+                  }}
+                  className="px-3 py-1 bg-error hover:bg-red-700 text-white text-xs rounded transition-colors"
+                >
+                  Grant Access
+                </button>
+                <button
+                  onClick={() => openAccessibilitySettings()}
+                  className="px-3 py-1 bg-surface hover:bg-primary text-text text-xs rounded transition-colors"
+                >
+                  Open Settings
+                </button>
+                <button
+                  onClick={() => relaunch()}
+                  className="px-3 py-1 bg-surface hover:bg-primary text-text text-xs rounded transition-colors"
+                >
+                  Relaunch
+                </button>
+                <button
+                  onClick={() =>
+                    checkAccessibilityPermission().then(setPermissionOk).catch(() => {})
+                  }
+                  className="px-3 py-1 text-text-muted hover:text-text text-xs transition-colors"
+                >
+                  Re-check
+                </button>
+              </div>
+            </div>
+          )}
+
           {update && (
             <div className="bg-blue-900/30 border border-blue-600 text-blue-200 text-sm rounded-lg px-4 py-3 flex items-center justify-between">
               <span>

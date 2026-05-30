@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Required under the hardened runtime so the app can capture microphone
+	     audio. The global-hotkey CGEvent tap and enigo auto-paste are gated by
+	     the Accessibility TCC grant (requested at runtime), not by entitlements. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>

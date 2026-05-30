@@ -140,6 +140,46 @@ fn get_current_hotkey(state: tauri::State<'_, AppState>) -> String {
     state.settings.lock().unwrap().hotkey.clone()
 }
 
+// --- macOS permission commands ---
+//
+// On macOS the global hotkey (CGEvent tap) and auto-paste (`enigo`) both require
+// the Accessibility permission. These commands let the UI check/request it. On
+// other platforms they are no-ops that report "granted".
+
+#[tauri::command]
+fn check_accessibility_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos_event_tap::has_accessibility_permission()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+#[tauri::command]
+fn request_accessibility_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos_event_tap::request_accessibility_permission()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+#[tauri::command]
+fn open_accessibility_settings() {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .spawn();
+    }
+}
+
 // --- Settings commands ---
 
 #[tauri::command]
@@ -263,7 +303,24 @@ pub fn run() {
                 }
             }
 
-            // Start the rdev hotkey listener
+            // On macOS the global hotkey + auto-paste need Accessibility permission.
+            // If it's missing, trigger the system prompt and notify the UI (the
+            // Dashboard also re-checks on mount and shows a banner).
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::Emitter;
+                if !macos_event_tap::has_accessibility_permission() {
+                    eprintln!(
+                        "Accessibility permission not granted — the global hotkey and \
+                         auto-paste will not work until it is granted in System Settings \
+                         ▸ Privacy & Security ▸ Accessibility, then the app is relaunched."
+                    );
+                    macos_event_tap::request_accessibility_permission();
+                    let _ = app.handle().emit("permission-required", "accessibility");
+                }
+            }
+
+            // Start the global hotkey listener
             let hotkey_state = hotkey::start_listener(app.handle(), &loaded_settings.hotkey);
 
             app.manage(AppState {
@@ -298,6 +355,9 @@ pub fn run() {
             set_hotkey,
             get_current_hotkey,
             pause_hotkey,
+            check_accessibility_permission,
+            request_accessibility_permission,
+            open_accessibility_settings,
             get_settings,
             save_settings,
             reset_settings,

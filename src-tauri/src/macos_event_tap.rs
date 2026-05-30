@@ -5,6 +5,7 @@
 //! Services Manager entirely and map keycodes to rdev::Key ourselves.
 
 use std::ffi::c_void;
+use std::thread;
 
 use rdev::{EventType, Key};
 
@@ -29,6 +30,7 @@ extern "C" {
         user_info: *mut c_void,
     ) -> CFMachPortRef;
     fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
+    fn CGEventTapIsEnabled(tap: CFMachPortRef) -> bool;
     fn CGEventGetIntegerValueField(event: CGEventRef, field: u32) -> i64;
     fn CGEventGetFlags(event: CGEventRef) -> u64;
 }
@@ -43,20 +45,45 @@ extern "C" {
     fn CFRunLoopGetCurrent() -> CFRunLoopRef;
     fn CFRunLoopAddSource(rl: CFRunLoopRef, source: CFRunLoopSourceRef, mode: CFStringRef);
     fn CFRunLoopRun();
+    fn CFDictionaryCreate(
+        allocator: *const c_void,
+        keys: *const *const c_void,
+        values: *const *const c_void,
+        num_values: isize,
+        key_callbacks: *const c_void,
+        value_callbacks: *const c_void,
+    ) -> *const c_void;
+    fn CFRelease(cf: *const c_void);
 
     static kCFRunLoopCommonModes: CFStringRef;
+    static kCFBooleanTrue: *const c_void;
 }
 
-// CGEventTapCreate constants
-const K_CG_SESSION_EVENT_TAP: u32 = 1;
+// `AXIsProcessTrusted*` (Accessibility permission) live in ApplicationServices.
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXIsProcessTrusted() -> bool;
+    fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
+
+    static kAXTrustedCheckOptionPrompt: CFStringRef;
+}
+
+// CGEventTapCreate constants. We use an HID-level tap (earliest point in the
+// event stream) with the *default* option: this requires Accessibility
+// permission (the same permission `enigo` auto-paste needs) rather than the
+// separate Input Monitoring grant a listen-only tap would require. We never
+// modify or swallow events — the callback always returns the event unchanged —
+// so a default tap behaves like a listener here while unifying on one grant.
+const K_CG_HID_EVENT_TAP: u32 = 0;
 const K_CG_HEAD_INSERT_EVENT_TAP: u32 = 0;
-const K_CG_EVENT_TAP_OPTION_LISTEN_ONLY: u32 = 1;
+const K_CG_EVENT_TAP_OPTION_DEFAULT: u32 = 0;
 
 // CGEventType values
 const K_CG_EVENT_KEY_DOWN: u32 = 10;
 const K_CG_EVENT_KEY_UP: u32 = 11;
 const K_CG_EVENT_FLAGS_CHANGED: u32 = 12;
-const K_CG_EVENT_TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFFFFFE;
+const K_CG_EVENT_TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFF_FFFE;
+const K_CG_EVENT_TAP_DISABLED_BY_USER_INPUT: u32 = 0xFFFF_FFFF;
 
 // CGEventField for virtual keycode
 const K_CG_KEYBOARD_EVENT_KEYCODE: u32 = 9;
@@ -75,6 +102,44 @@ const K_CG_EVENT_FLAG_MASK_COMMAND: u64 = 0x0010_0000;
 struct TapContext<F> {
     callback: F,
     tap: CFMachPortRef,
+}
+
+// ---------------------------------------------------------------------------
+// Permissions (Accessibility / TCC)
+// ---------------------------------------------------------------------------
+
+/// Returns true if the app currently holds macOS Accessibility permission.
+/// This single grant covers both the CGEvent tap (key capture) and `enigo`
+/// auto-paste (synthetic key posting), so it's the only permission to check.
+pub fn has_accessibility_permission() -> bool {
+    unsafe { AXIsProcessTrusted() }
+}
+
+/// Prompt the user to grant Accessibility permission. Shows the system dialog
+/// that deep-links to System Settings ▸ Privacy & Security ▸ Accessibility and
+/// adds the app to that list. Returns the *current* trust state; the grant only
+/// takes effect after the app is relaunched.
+pub fn request_accessibility_permission() -> bool {
+    unsafe {
+        let keys: [*const c_void; 1] = [kAXTrustedCheckOptionPrompt as *const c_void];
+        let values: [*const c_void; 1] = [kCFBooleanTrue];
+        // Null key/value callbacks are correct here: the key is a framework
+        // constant (matched by pointer, the way AX looks it up) and the value is
+        // the immortal `kCFBooleanTrue` singleton, so nothing needs retain/release.
+        let options = CFDictionaryCreate(
+            std::ptr::null(),
+            keys.as_ptr(),
+            values.as_ptr(),
+            1,
+            std::ptr::null(),
+            std::ptr::null(),
+        );
+        let trusted = AXIsProcessTrustedWithOptions(options);
+        if !options.is_null() {
+            CFRelease(options);
+        }
+        trusted
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -97,16 +162,19 @@ where
 
     unsafe {
         let tap = CGEventTapCreate(
-            K_CG_SESSION_EVENT_TAP,
+            K_CG_HID_EVENT_TAP,
             K_CG_HEAD_INSERT_EVENT_TAP,
-            K_CG_EVENT_TAP_OPTION_LISTEN_ONLY,
+            K_CG_EVENT_TAP_OPTION_DEFAULT,
             mask,
             raw_callback::<F>,
             context as *mut c_void,
         );
 
         if tap.is_null() {
-            eprintln!("Failed to create CGEvent tap — is Accessibility permission granted?");
+            eprintln!(
+                "Failed to create CGEvent tap — grant Accessibility permission \
+                 (System Settings ▸ Privacy & Security ▸ Accessibility) and relaunch."
+            );
             let _ = Box::from_raw(context);
             return;
         }
@@ -118,6 +186,21 @@ where
         let run_loop = CFRunLoopGetCurrent();
         CFRunLoopAddSource(run_loop, source, kCFRunLoopCommonModes);
         CGEventTapEnable(tap, true);
+
+        // Watchdog: macOS can silently disable a tap (notably across sleep/wake),
+        // and the disabled-event callback isn't 100% reliable. Periodically check
+        // and re-enable. The mach port is thread-safe for enable/is-enabled, so we
+        // pass it as an integer to satisfy `Send`.
+        let tap_addr = tap as usize;
+        thread::spawn(move || loop {
+            thread::sleep(std::time::Duration::from_secs(1));
+            unsafe {
+                let tap = tap_addr as CFMachPortRef;
+                if !CGEventTapIsEnabled(tap) {
+                    CGEventTapEnable(tap, true);
+                }
+            }
+        });
 
         CFRunLoopRun(); // blocks forever
     }
@@ -135,8 +218,11 @@ unsafe extern "C" fn raw_callback<F: FnMut(EventType)>(
 ) -> CGEventRef {
     let ctx = &mut *(user_info as *mut TapContext<F>);
 
-    // macOS disables the tap after a timeout — re-enable it.
-    if event_type == K_CG_EVENT_TAP_DISABLED_BY_TIMEOUT {
+    // macOS disables the tap if our callback is too slow (timeout) or after
+    // certain user input / system transitions — re-enable it in both cases.
+    if event_type == K_CG_EVENT_TAP_DISABLED_BY_TIMEOUT
+        || event_type == K_CG_EVENT_TAP_DISABLED_BY_USER_INPUT
+    {
         if !ctx.tap.is_null() {
             CGEventTapEnable(ctx.tap, true);
         }
