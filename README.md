@@ -66,6 +66,29 @@ Download the latest release for your platform from the [Releases page](https://g
 - **macOS** — `.dmg` (universal: Intel + Apple Silicon)
 - **Windows** — `.msi` or `.exe`
 
+### macOS Permissions
+
+On macOS the app needs **two permissions** before the hotkey works — it prompts for both
+on first launch:
+
+- **Accessibility** (System Settings ▸ Privacy & Security ▸ Accessibility) — powers the
+  global push-to-talk hotkey *and* auto-paste. Without it the hotkey does nothing.
+- **Microphone** — to record your speech.
+
+Toggle **Speech AI Tool** on in each pane, then **relaunch the app** (the in-app banner
+has a Relaunch button). The hotkey listener is created at startup, so the grant only
+takes effect after a restart.
+
+> **Unsigned builds:** macOS Gatekeeper blocks unsigned apps on first launch — right-click
+> the app → **Open** → **Open**, or run `xattr -cr "/Applications/Speech AI Tool.app"`.
+> Because macOS ties a permission grant to the app's code signature, an unsigned build can
+> lose the grant when it's rebuilt or moved. If the hotkey stops working after an update,
+> reset and re-grant:
+> ```bash
+> tccutil reset Accessibility com.speech-ai-tool.app
+> tccutil reset Microphone com.speech-ai-tool.app
+> ```
+
 ### Building from Source
 
 #### System Dependencies
@@ -107,6 +130,21 @@ pnpm tauri dev
 # Build for production
 pnpm tauri build
 ```
+
+#### macOS code signing & notarization (maintainers)
+
+The release workflow signs and notarizes the macOS build automatically **if** these
+GitHub Actions secrets are set (otherwise it produces unsigned artifacts, as today):
+
+| Secret | Purpose |
+|--------|---------|
+| `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD` | base64 of a *Developer ID Application* `.p12` and its password |
+| `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Your Name (TEAMID)` |
+| `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` | Apple ID + app-specific password + team ID, for notarization |
+
+A Developer ID requires the [Apple Developer Program](https://developer.apple.com/programs/)
+($99/yr). This is separate from Tauri's updater signature (`TAURI_SIGNING_PRIVATE_KEY`),
+which is already configured.
 
 ## Configuration
 
