@@ -42,6 +42,12 @@ pub fn microphone_permission_status() -> &'static str {
 /// If permission was already decided, the completion handler fires
 /// immediately with the stored answer.
 pub async fn request_microphone_permission() -> bool {
+    // All ObjC values stay inside the sync helper: the returned future must be
+    // Send (Tauri requirement), and RcBlock is not.
+    spawn_request().await.unwrap_or(false)
+}
+
+fn spawn_request() -> tokio::sync::oneshot::Receiver<bool> {
     let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
     // The completion block is `Fn`, but the oneshot sender must be consumed.
     let tx = Mutex::new(Some(tx));
@@ -50,6 +56,8 @@ pub async fn request_microphone_permission() -> bool {
             let _ = tx.send(granted.as_bool());
         }
     });
+    // AVFoundation copies the (refcounted) block for the async callback, so
+    // dropping our reference when this fn returns is fine.
     unsafe {
         let _: () = msg_send![
             class!(AVCaptureDevice),
@@ -57,5 +65,5 @@ pub async fn request_microphone_permission() -> bool {
             completionHandler: &*block
         ];
     }
-    rx.await.unwrap_or(false)
+    rx
 }
