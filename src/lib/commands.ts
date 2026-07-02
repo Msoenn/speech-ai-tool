@@ -75,6 +75,28 @@ export async function openAccessibilitySettings(): Promise<void> {
   return invoke("open_accessibility_settings");
 }
 
+// Re-checks Accessibility and (re)starts the hotkey listener if granted, so
+// a fresh grant takes effect without relaunching the app.
+export async function restartHotkeyListener(): Promise<boolean> {
+  return invoke("restart_hotkey_listener");
+}
+
+// On macOS the microphone permission must be checked/requested explicitly
+// before touching audio devices; elsewhere the backend reports "granted".
+export type MicPermission = "notdetermined" | "restricted" | "denied" | "granted";
+
+export async function checkMicrophonePermission(): Promise<MicPermission> {
+  return invoke("check_microphone_permission");
+}
+
+export async function requestMicrophonePermission(): Promise<boolean> {
+  return invoke("request_microphone_permission");
+}
+
+export async function openMicrophoneSettings(): Promise<void> {
+  return invoke("open_microphone_settings");
+}
+
 export async function getSettings(): Promise<AppSettings> {
   return invoke("get_settings");
 }

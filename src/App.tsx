@@ -13,6 +13,7 @@ import {
   checkAccessibilityPermission,
   requestAccessibilityPermission,
   openAccessibilitySettings,
+  restartHotkeyListener,
 } from "./lib/commands";
 
 const isOverlay =
@@ -47,6 +48,21 @@ function Dashboard() {
   useEffect(() => {
     checkAccessibilityPermission().then(setPermissionOk).catch(() => {});
   }, []);
+
+  // While the banner is up, poll so it dismisses itself (and the hotkey
+  // listener restarts) the moment the user flips the toggle in System
+  // Settings — no relaunch needed.
+  useEffect(() => {
+    if (permissionOk) return;
+    const id = setInterval(() => {
+      restartHotkeyListener()
+        .then((ok) => {
+          if (ok) setPermissionOk(true);
+        })
+        .catch(() => {});
+    }, 2000);
+    return () => clearInterval(id);
+  }, [permissionOk]);
 
   // The backend emits this when it detects the permission is missing at startup.
   const onPermissionRequired = useCallback(() => setPermissionOk(false), []);
@@ -83,7 +99,13 @@ function Dashboard() {
             <div className="bg-error/10 border border-error text-error text-sm rounded-lg px-4 py-3 space-y-2">
               <p>
                 Accessibility permission is required for the global hotkey and
-                auto-paste to work. Grant it below, then relaunch the app.
+                auto-paste to work.
+              </p>
+              <p>
+                If you recently updated the app, System Settings may show Speech
+                AI Tool already enabled — that entry is stale: remove it with the
+                &minus; button (or toggle it off and on), then re-add the app.
+                This banner disappears as soon as access is granted.
               </p>
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -102,16 +124,10 @@ function Dashboard() {
                   Open Settings
                 </button>
                 <button
-                  onClick={() => relaunch()}
-                  className="px-3 py-1 bg-surface hover:bg-primary text-text text-xs rounded transition-colors"
-                >
-                  Relaunch
-                </button>
-                <button
                   onClick={() =>
-                    checkAccessibilityPermission().then(setPermissionOk).catch(() => {})
+                    restartHotkeyListener().then(setPermissionOk).catch(() => {})
                   }
-                  className="px-3 py-1 text-text-muted hover:text-text text-xs transition-colors"
+                  className="px-3 py-1 bg-surface hover:bg-primary text-text text-xs rounded transition-colors"
                 >
                   Re-check
                 </button>
