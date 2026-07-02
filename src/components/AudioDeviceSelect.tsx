@@ -1,5 +1,13 @@
-import { useState, useEffect } from "react";
-import { listAudioDevices, startRecording, stopRecording } from "../lib/commands";
+import { useState, useEffect, useCallback } from "react";
+import {
+  listAudioDevices,
+  startRecording,
+  stopRecording,
+  checkMicrophonePermission,
+  requestMicrophonePermission,
+  openMicrophoneSettings,
+  type MicPermission,
+} from "../lib/commands";
 import type { AudioDevice } from "../lib/types";
 
 interface AudioDeviceSelectProps {
@@ -7,17 +15,47 @@ interface AudioDeviceSelectProps {
 }
 
 export default function AudioDeviceSelect({ onDeviceChange }: AudioDeviceSelectProps) {
+  const [micPermission, setMicPermission] = useState<MicPermission | "loading">("loading");
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [recording, setRecording] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    listAudioDevices()
-      .then((devs) => setDevices(devs))
+  const refreshPermission = useCallback(() => {
+    checkMicrophonePermission()
+      .then((p) => {
+        setMicPermission(p);
+        setError(null);
+      })
       .catch((e) => setError(String(e)));
   }, []);
+
+  // Only touch the audio subsystem once the mic permission is granted —
+  // device enumeration itself triggers the macOS permission prompt.
+  useEffect(() => {
+    refreshPermission();
+  }, [refreshPermission]);
+
+  useEffect(() => {
+    if (micPermission !== "granted") return;
+    listAudioDevices()
+      .then((devs) => {
+        setDevices(devs);
+        setError(null);
+      })
+      .catch((e) => setError(String(e)));
+  }, [micPermission]);
+
+  const enableMicrophone = useCallback(async () => {
+    setError(null);
+    try {
+      await requestMicrophonePermission();
+      refreshPermission();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [refreshPermission]);
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value === "" ? null : Number(e.target.value);
@@ -48,6 +86,62 @@ export default function AudioDeviceSelect({ onDeviceChange }: AudioDeviceSelectP
     }
   };
 
+  if (micPermission === "loading") {
+    return (
+      <div className="space-y-3">
+        <label className="block text-sm font-medium text-text-muted">Microphone</label>
+        <p className="text-text-muted text-sm">Checking microphone access…</p>
+        {error && <p className="text-error text-sm">{error}</p>}
+      </div>
+    );
+  }
+
+  if (micPermission === "notdetermined") {
+    return (
+      <div className="space-y-3">
+        <label className="block text-sm font-medium text-text-muted">Microphone</label>
+        <p className="text-text-muted text-sm">
+          Microphone access is needed to record and transcribe your speech.
+        </p>
+        <button
+          onClick={enableMicrophone}
+          className="px-4 py-2 rounded text-sm font-medium bg-primary text-white hover:bg-blue-700 transition-colors"
+        >
+          Enable microphone access
+        </button>
+        {error && <p className="text-error text-sm">{error}</p>}
+      </div>
+    );
+  }
+
+  if (micPermission === "denied" || micPermission === "restricted") {
+    return (
+      <div className="space-y-3">
+        <label className="block text-sm font-medium text-text-muted">Microphone</label>
+        <p className="text-warning text-sm">
+          Microphone access is denied. Open System Settings ▸ Privacy &amp; Security ▸
+          Microphone and enable Speech AI Tool. After an app update you may need to
+          remove the stale entry (−) and re-enable it.
+        </p>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => openMicrophoneSettings()}
+            className="px-4 py-2 rounded text-sm font-medium bg-primary text-white hover:bg-blue-700 transition-colors"
+          >
+            Open Settings
+          </button>
+          <button
+            onClick={refreshPermission}
+            className="px-4 py-2 rounded text-sm font-medium text-text-muted hover:text-text transition-colors"
+          >
+            Re-check
+          </button>
+        </div>
+        {error && <p className="text-error text-sm">{error}</p>}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
       <label className="block text-sm font-medium text-text-muted">Microphone</label>
@@ -67,7 +161,8 @@ export default function AudioDeviceSelect({ onDeviceChange }: AudioDeviceSelectP
       <div className="flex items-center gap-3">
         <button
           onClick={toggleRecording}
-          className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
+          disabled={micPermission !== "granted"}
+          className={`px-4 py-2 rounded text-sm font-medium transition-colors disabled:opacity-50 ${
             recording
               ? "bg-recording text-white hover:bg-red-600 animate-pulse"
               : "bg-primary text-white hover:bg-blue-700"

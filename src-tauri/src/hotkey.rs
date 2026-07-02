@@ -18,6 +18,8 @@ pub struct HotkeyState {
     combo_active: AtomicBool,
     /// Paused during UI hotkey recording to prevent conflicts
     paused: AtomicBool,
+    /// Whether a listener thread is currently alive
+    listener_running: AtomicBool,
 }
 
 impl HotkeyState {
@@ -26,24 +28,35 @@ impl HotkeyState {
             combo: Mutex::new(combo),
             combo_active: AtomicBool::new(false),
             paused: AtomicBool::new(false),
+            listener_running: AtomicBool::new(false),
         }
     }
 }
 
-/// Start the global key-event listener thread. Returns shared state for runtime updates.
+/// Spawn the global key-event listener thread if one isn't already running.
+/// Idempotent, and restartable: on macOS the CGEvent tap fails to create
+/// while the Accessibility permission is missing, in which case the thread
+/// exits and clears the running flag so a later call can retry (e.g. after
+/// the user grants the permission — no app relaunch needed).
 ///
 /// On macOS we use a direct CGEvent tap (see `macos_event_tap`) to avoid
 /// rdev's `TSMGetInputSourceProperty` call, which crashes on macOS 26.3+
 /// when invoked from a background thread.  On other platforms we use `rdev::listen`.
-pub fn start_listener(app: &AppHandle, hotkey_str: &str) -> Arc<HotkeyState> {
-    let combo = parse_hotkey_string(hotkey_str);
-    let state = Arc::new(HotkeyState::new(combo));
-    let state_clone = Arc::clone(&state);
+pub fn ensure_listener(app: &AppHandle, state: &Arc<HotkeyState>) {
+    if state.listener_running.swap(true, Ordering::SeqCst) {
+        return; // already running
+    }
+
+    let state_clone = Arc::clone(state);
+    let running_flag = Arc::clone(state);
     let app_handle = app.clone();
 
     thread::spawn(move || {
         let mut held_keys: HashSet<Key> = HashSet::new();
 
+        // `mut` is used by the rdev path below; on macOS the closure is moved
+        // into the event tap without being called through this binding.
+        #[cfg_attr(target_os = "macos", allow(unused_mut))]
         let mut handle_event = move |event_type: EventType| match event_type {
             EventType::KeyPress(key) => {
                 held_keys.insert(key);
@@ -67,9 +80,9 @@ pub fn start_listener(app: &AppHandle, hotkey_str: &str) -> Arc<HotkeyState> {
                 eprintln!("rdev listener error: {:?}", e);
             }
         }
-    });
 
-    state
+        running_flag.listener_running.store(false, Ordering::SeqCst);
+    });
 }
 
 fn check_combo(held_keys: &HashSet<Key>, state: &Arc<HotkeyState>, app: &AppHandle) {

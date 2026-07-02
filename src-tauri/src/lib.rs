@@ -4,6 +4,8 @@ mod history;
 mod hotkey;
 #[cfg(target_os = "macos")]
 mod macos_event_tap;
+#[cfg(target_os = "macos")]
+mod macos_microphone;
 mod llm;
 mod output;
 mod pipeline;
@@ -33,23 +35,43 @@ pub struct AppState {
 }
 
 // --- Audio commands ---
+//
+// These (and the whisper load/transcribe commands below) are async and run
+// their blocking work on the thread pool: synchronous Tauri commands execute
+// on the main thread, and blocking it while CoreAudio raises the microphone
+// permission prompt deadlocks the dialog (it re-presents forever). Heavy
+// whisper work would likewise freeze the UI.
 
 #[tauri::command]
-fn list_audio_devices() -> Result<Vec<audio::AudioDevice>, AppError> {
-    audio::list_input_devices()
+async fn list_audio_devices() -> Result<Vec<audio::AudioDevice>, AppError> {
+    tauri::async_runtime::spawn_blocking(audio::list_input_devices)
+        .await
+        .map_err(|e| AppError::Audio(format!("task join error: {e}")))?
 }
 
 #[tauri::command]
-fn start_recording(
-    state: tauri::State<'_, AppState>,
+async fn start_recording(
+    app: tauri::AppHandle,
     device_index: Option<usize>,
 ) -> Result<(), AppError> {
-    state.recorder.lock().unwrap().start_recording(device_index)
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let result = state.recorder.lock().unwrap().start_recording(device_index);
+        result
+    })
+    .await
+    .map_err(|e| AppError::Audio(format!("task join error: {e}")))?
 }
 
 #[tauri::command]
-fn stop_recording(state: tauri::State<'_, AppState>) -> Result<Vec<u8>, AppError> {
-    state.recorder.lock().unwrap().stop_recording()
+async fn stop_recording(app: tauri::AppHandle) -> Result<Vec<u8>, AppError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let result = state.recorder.lock().unwrap().stop_recording();
+        result
+    })
+    .await
+    .map_err(|e| AppError::Audio(format!("task join error: {e}")))?
 }
 
 // --- Whisper commands ---
@@ -65,20 +87,24 @@ async fn download_whisper_model(app: tauri::AppHandle, model_name: String) -> Re
 }
 
 #[tauri::command]
-fn load_whisper_model(
-    state: tauri::State<'_, AppState>,
-    model_name: String,
-) -> Result<(), AppError> {
-    state.whisper.load_model(&model_name)
+async fn load_whisper_model(app: tauri::AppHandle, model_name: String) -> Result<(), AppError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state.whisper.load_model(&model_name)
+    })
+    .await
+    .map_err(|e| AppError::Whisper(format!("task join error: {e}")))?
 }
 
 #[tauri::command]
-fn transcribe_audio(
-    state: tauri::State<'_, AppState>,
-    wav_bytes: Vec<u8>,
-) -> Result<String, AppError> {
-    let language = state.settings.lock().unwrap().whisper_language.clone();
-    state.whisper.transcribe(&wav_bytes, &language)
+async fn transcribe_audio(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<String, AppError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let language = state.settings.lock().unwrap().whisper_language.clone();
+        state.whisper.transcribe(&wav_bytes, &language)
+    })
+    .await
+    .map_err(|e| AppError::Whisper(format!("task join error: {e}")))?
 }
 
 #[tauri::command]
@@ -176,6 +202,66 @@ fn open_accessibility_settings() {
     {
         let _ = std::process::Command::new("open")
             .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .spawn();
+    }
+}
+
+/// Re-check Accessibility and (re)start the hotkey listener without a relaunch.
+/// Returns whether the permission is granted; the listener runs iff granted.
+#[tauri::command]
+fn restart_hotkey_listener(app: tauri::AppHandle) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        if !macos_event_tap::has_accessibility_permission() {
+            return false;
+        }
+        let state = app.state::<AppState>();
+        hotkey::ensure_listener(&app, &state.hotkey_state);
+        true
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let state = app.state::<AppState>();
+        hotkey::ensure_listener(&app, &state.hotkey_state);
+        true
+    }
+}
+
+// On macOS, cpal touching CoreAudio implicitly triggers the microphone
+// permission prompt, so the UI checks/requests the permission explicitly
+// before listing devices or recording. On other platforms these report
+// "granted" (no-op).
+
+#[tauri::command]
+fn check_microphone_permission() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        macos_microphone::microphone_permission_status().to_string()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "granted".to_string()
+    }
+}
+
+#[tauri::command]
+async fn request_microphone_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos_microphone::request_microphone_permission().await
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+#[tauri::command]
+fn open_microphone_settings() {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
             .spawn();
     }
 }
@@ -303,25 +389,43 @@ pub fn run() {
                 }
             }
 
+            let hotkey_state = Arc::new(HotkeyState::new(hotkey::parse_hotkey_string(
+                &loaded_settings.hotkey,
+            )));
+
             // On macOS the global hotkey + auto-paste need Accessibility permission.
-            // If it's missing, trigger the system prompt and notify the UI (the
-            // Dashboard also re-checks on mount and shows a banner).
+            // Only start the listener when granted (a tap created without the grant
+            // is dead); the banner's "Re-check" restarts it via
+            // `restart_hotkey_listener` once the user grants access.
             #[cfg(target_os = "macos")]
             {
                 use tauri::Emitter;
-                if !macos_event_tap::has_accessibility_permission() {
+                if macos_event_tap::has_accessibility_permission() {
+                    hotkey::ensure_listener(app.handle(), &hotkey_state);
+                } else {
                     eprintln!(
                         "Accessibility permission not granted — the global hotkey and \
                          auto-paste will not work until it is granted in System Settings \
-                         ▸ Privacy & Security ▸ Accessibility, then the app is relaunched."
+                         ▸ Privacy & Security ▸ Accessibility."
                     );
-                    macos_event_tap::request_accessibility_permission();
+                    // Auto-fire the system prompt only on first launch; afterwards
+                    // the banner handles it (re-prompting is useless when the real
+                    // problem is a stale TCC entry from a previous unsigned build).
+                    let already_prompted = store
+                        .get("accessibility_prompt_shown")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    if !already_prompted {
+                        macos_event_tap::request_accessibility_permission();
+                        store.set("accessibility_prompt_shown", true);
+                        let _ = store.save();
+                    }
                     let _ = app.handle().emit("permission-required", "accessibility");
                 }
             }
 
-            // Start the global hotkey listener
-            let hotkey_state = hotkey::start_listener(app.handle(), &loaded_settings.hotkey);
+            #[cfg(not(target_os = "macos"))]
+            hotkey::ensure_listener(app.handle(), &hotkey_state);
 
             app.manage(AppState {
                 recorder: Mutex::new(AudioRecorder::new()),
@@ -358,6 +462,10 @@ pub fn run() {
             check_accessibility_permission,
             request_accessibility_permission,
             open_accessibility_settings,
+            restart_hotkey_listener,
+            check_microphone_permission,
+            request_microphone_permission,
+            open_microphone_settings,
             get_settings,
             save_settings,
             reset_settings,

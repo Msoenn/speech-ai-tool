@@ -194,11 +194,9 @@ where
         let tap_addr = tap as usize;
         thread::spawn(move || loop {
             thread::sleep(std::time::Duration::from_secs(1));
-            unsafe {
-                let tap = tap_addr as CFMachPortRef;
-                if !CGEventTapIsEnabled(tap) {
-                    CGEventTapEnable(tap, true);
-                }
+            let tap = tap_addr as CFMachPortRef;
+            if !CGEventTapIsEnabled(tap) {
+                CGEventTapEnable(tap, true);
             }
         });
 
