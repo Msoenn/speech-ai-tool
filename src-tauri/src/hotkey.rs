@@ -54,7 +54,10 @@ pub fn ensure_listener(app: &AppHandle, state: &Arc<HotkeyState>) {
     thread::spawn(move || {
         let mut held_keys: HashSet<Key> = HashSet::new();
 
-        let handle_event = move |event_type: EventType| match event_type {
+        // `mut` is used by the rdev path below; on macOS the closure is moved
+        // into the event tap without being called through this binding.
+        #[cfg_attr(target_os = "macos", allow(unused_mut))]
+        let mut handle_event = move |event_type: EventType| match event_type {
             EventType::KeyPress(key) => {
                 held_keys.insert(key);
                 check_combo(&held_keys, &state_clone, &app_handle);
