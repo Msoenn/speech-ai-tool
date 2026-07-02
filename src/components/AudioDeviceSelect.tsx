@@ -22,18 +22,28 @@ export default function AudioDeviceSelect({ onDeviceChange }: AudioDeviceSelectP
   const [testResult, setTestResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const refreshPermission = useCallback(() => {
+    checkMicrophonePermission()
+      .then((p) => {
+        setMicPermission(p);
+        setError(null);
+      })
+      .catch((e) => setError(String(e)));
+  }, []);
+
   // Only touch the audio subsystem once the mic permission is granted —
   // device enumeration itself triggers the macOS permission prompt.
   useEffect(() => {
-    checkMicrophonePermission()
-      .then(setMicPermission)
-      .catch((e) => setError(String(e)));
-  }, []);
+    refreshPermission();
+  }, [refreshPermission]);
 
   useEffect(() => {
     if (micPermission !== "granted") return;
     listAudioDevices()
-      .then((devs) => setDevices(devs))
+      .then((devs) => {
+        setDevices(devs);
+        setError(null);
+      })
       .catch((e) => setError(String(e)));
   }, [micPermission]);
 
@@ -41,17 +51,11 @@ export default function AudioDeviceSelect({ onDeviceChange }: AudioDeviceSelectP
     setError(null);
     try {
       await requestMicrophonePermission();
-      setMicPermission(await checkMicrophonePermission());
+      refreshPermission();
     } catch (e) {
       setError(String(e));
     }
-  }, []);
-
-  const recheckPermission = useCallback(() => {
-    checkMicrophonePermission()
-      .then(setMicPermission)
-      .catch((e) => setError(String(e)));
-  }, []);
+  }, [refreshPermission]);
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value === "" ? null : Number(e.target.value);
@@ -81,6 +85,16 @@ export default function AudioDeviceSelect({ onDeviceChange }: AudioDeviceSelectP
       setRecording(false);
     }
   };
+
+  if (micPermission === "loading") {
+    return (
+      <div className="space-y-3">
+        <label className="block text-sm font-medium text-text-muted">Microphone</label>
+        <p className="text-text-muted text-sm">Checking microphone access…</p>
+        {error && <p className="text-error text-sm">{error}</p>}
+      </div>
+    );
+  }
 
   if (micPermission === "notdetermined") {
     return (
@@ -117,7 +131,7 @@ export default function AudioDeviceSelect({ onDeviceChange }: AudioDeviceSelectP
             Open Settings
           </button>
           <button
-            onClick={recheckPermission}
+            onClick={refreshPermission}
             className="px-4 py-2 rounded text-sm font-medium text-text-muted hover:text-text transition-colors"
           >
             Re-check
