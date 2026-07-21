@@ -92,6 +92,21 @@ export default function WhisperSettings({ settings, onChange }: WhisperSettingsP
               className="w-full bg-bg border border-primary rounded px-3 py-2 text-text text-sm focus:outline-none focus:ring-1 focus:ring-accent"
             />
           </div>
+          <div>
+            <label className="block text-xs text-text-muted mb-1">Model</label>
+            <input
+              type="text"
+              value={settings.whisper_api_model}
+              onChange={(e) => onChange({ ...settings, whisper_api_model: e.target.value })}
+              placeholder="whisper-1"
+              className="w-full bg-bg border border-primary rounded px-3 py-2 text-text text-sm focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+            <p className="text-xs text-text-muted mt-1">
+              The model name sent to your Whisper API. For OpenAI use{" "}
+              <code>whisper-1</code>; for a self-hosted server use the exact model id it has
+              installed (e.g. <code>Systran/faster-whisper-large-v3</code>).
+            </p>
+          </div>
         </div>
       )}
     </div>

@@ -37,36 +37,46 @@ export default function StatusOverlay() {
 
   if (!visible) return null;
 
+  const label: Record<PipelineStatus, string> = {
+    idle: "",
+    recording: "Listening…",
+    transcribing: "Transcribing…",
+    cleaning: "Cleaning up…",
+    done: "Done",
+    error: "Error",
+  };
+
   return (
     <div
       onMouseDown={handleMouseDown}
-      className="h-screen w-screen flex items-center justify-center select-none cursor-grab active:cursor-grabbing"
+      className="h-screen w-screen flex items-center justify-center gap-2.5 px-4 select-none cursor-grab active:cursor-grabbing rounded-xl"
       style={{ background: "#1a1a2e" }}
     >
       {status === "recording" && (
-        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="#ef4444">
+        <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="#ef4444">
           <rect x="3" y="3" width="18" height="18" rx="3">
             <animate attributeName="opacity" values="1;0.4;1" dur="1.2s" repeatCount="indefinite" />
           </rect>
         </svg>
       )}
       {(status === "transcribing" || status === "cleaning") && (
-        <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
+        <svg className="w-4 h-4 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="#eab308" strokeWidth="3" />
           <path fill="#eab308" opacity="0.8" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
         </svg>
       )}
       {status === "done" && (
-        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+        <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="20 6 9 17 4 12" />
         </svg>
       )}
       {status === "error" && (
-        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="3" strokeLinecap="round">
+        <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="3" strokeLinecap="round">
           <line x1="18" y1="6" x2="6" y2="18" />
           <line x1="6" y1="6" x2="18" y2="18" />
         </svg>
       )}
+      <span className="text-sm font-medium text-white whitespace-nowrap">{label[status]}</span>
     </div>
   );
 }

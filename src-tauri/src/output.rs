@@ -23,7 +23,7 @@ pub fn copy_and_paste(
     if auto_paste {
         // Small delay to ensure clipboard is ready
         std::thread::sleep(std::time::Duration::from_millis(100));
-        if let Err(e) = simulate_paste(paste_shortcut) {
+        if let Err(e) = simulate_paste(app, paste_shortcut) {
             eprintln!("Auto-paste failed (text is in clipboard): {}", e);
         }
     }
@@ -68,13 +68,44 @@ fn parse_paste_shortcut(shortcut: &str) -> Result<(Vec<Key>, Key), AppError> {
     Ok((modifiers, char_key))
 }
 
-fn simulate_paste(paste_shortcut: &str) -> Result<(), AppError> {
+fn simulate_paste(app: &tauri::AppHandle, paste_shortcut: &str) -> Result<(), AppError> {
     let (modifiers, char_key) = parse_paste_shortcut(paste_shortcut)?;
 
-    let mut enigo = Enigo::new(&Settings::default())
-        .map_err(|e| AppError::Output(format!("Failed to create enigo: {}", e)))?;
+    // On macOS 26.3+, enigo's character-key path calls TSMGetInputSourceProperty
+    // (Text Services Manager) to resolve the layout-dependent keycode. TSM
+    // hard-asserts it is called on the main dispatch queue and SIGTRAPs on any
+    // other thread. copy_and_paste runs on a tokio worker, so the synthesis must
+    // be marshalled onto the main thread. (This is the same TSM-on-a-background-
+    // thread crash that macos_event_tap.rs works around for key *listening*.)
+    #[cfg(target_os = "macos")]
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.run_on_main_thread(move || {
+            let _ = tx.send(press_paste_chord(&modifiers, char_key));
+        })
+        .map_err(|e| {
+            AppError::Output(format!("Failed to dispatch paste to main thread: {}", e))
+        })?;
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .map_err(|e| AppError::Output(format!("Paste task did not complete: {}", e)))?
+            .map_err(AppError::Output)
+    }
 
-    // Defensively release all common modifiers to ensure clean state
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        press_paste_chord(&modifiers, char_key).map_err(AppError::Output)
+    }
+}
+
+/// Synthesize the paste chord (modifiers + key). On macOS this MUST run on the
+/// main thread — see the note in `simulate_paste`.
+fn press_paste_chord(modifiers: &[Key], char_key: Key) -> Result<(), String> {
+    let mut enigo =
+        Enigo::new(&Settings::default()).map_err(|e| format!("Failed to create enigo: {}", e))?;
+
+    // Defensively release all common modifiers to ensure clean state (e.g. the
+    // hotkey's own modifiers may still be physically held).
     let all_modifiers = [Key::Control, Key::Shift, Key::Alt, Key::Meta];
     for m in &all_modifiers {
         let _ = enigo.key(*m, Direction::Release);
@@ -82,22 +113,22 @@ fn simulate_paste(paste_shortcut: &str) -> Result<(), AppError> {
     std::thread::sleep(std::time::Duration::from_millis(50));
 
     // Press modifiers
-    for m in &modifiers {
+    for m in modifiers {
         enigo
             .key(*m, Direction::Press)
-            .map_err(|e| AppError::Output(format!("Key press failed: {}", e)))?;
+            .map_err(|e| format!("Key press failed: {}", e))?;
     }
 
     // Press the key
     enigo
         .key(char_key, Direction::Click)
-        .map_err(|e| AppError::Output(format!("Key click failed: {}", e)))?;
+        .map_err(|e| format!("Key click failed: {}", e))?;
 
     // Release modifiers in reverse order
     for m in modifiers.iter().rev() {
         enigo
             .key(*m, Direction::Release)
-            .map_err(|e| AppError::Output(format!("Key release failed: {}", e)))?;
+            .map_err(|e| format!("Key release failed: {}", e))?;
     }
 
     Ok(())

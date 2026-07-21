@@ -208,6 +208,7 @@ impl WhisperEngine {
 pub async fn transcribe_via_api(
     endpoint: &str,
     api_key: &str,
+    model: &str,
     wav_bytes: &[u8],
     language: &str,
 ) -> Result<String, AppError> {
@@ -216,6 +217,14 @@ pub async fn transcribe_via_api(
         endpoint.trim_end_matches('/')
     );
 
+    // Fall back to the OpenAI default when the field is blank so a cleared
+    // model box still produces a valid request.
+    let model = if model.trim().is_empty() {
+        "whisper-1"
+    } else {
+        model.trim()
+    };
+
     let part = reqwest::multipart::Part::bytes(wav_bytes.to_vec())
         .file_name("audio.wav")
         .mime_str("audio/wav")
@@ -223,7 +232,7 @@ pub async fn transcribe_via_api(
 
     let mut form = reqwest::multipart::Form::new()
         .part("file", part)
-        .text("model", "whisper-1");
+        .text("model", model.to_string());
 
     if language != "auto" {
         form = form.text("language", language.to_string());

@@ -61,6 +61,7 @@ pub async fn run_pipeline(app: AppHandle) -> Result<(), AppError> {
             crate::whisper::transcribe_via_api(
                 &settings.whisper_api_endpoint,
                 &settings.whisper_api_key,
+                &settings.whisper_api_model,
                 &wav_bytes,
                 &settings.whisper_language,
             )

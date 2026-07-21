@@ -94,8 +94,8 @@ pub fn set_tray_status(app: &AppHandle, status: &str) {
     let _ = tray.set_tooltip(Some(tooltip));
 }
 
-const OVERLAY_W: f64 = 36.0;
-const OVERLAY_H: f64 = 36.0;
+const OVERLAY_W: f64 = 200.0;
+const OVERLAY_H: f64 = 44.0;
 
 pub fn show_overlay(app: &AppHandle) {
     // If the overlay window already exists, just show it
@@ -113,22 +113,27 @@ pub fn show_overlay(app: &AppHandle) {
         .min_inner_size(OVERLAY_W, OVERLAY_H)
         .max_inner_size(OVERLAY_W, OVERLAY_H)
         .decorations(false)
+        .transparent(true)
         .always_on_top(true)
         .skip_taskbar(true)
         .focused(false)
         .resizable(false);
 
-    // Position top-right of primary monitor
+    // Position bottom-center of the primary monitor, lifted above the
+    // dock/taskbar by a margin.
+    const BOTTOM_MARGIN: f64 = 80.0;
     let builder = if let Some(monitor) = app
         .get_webview_window("main")
         .and_then(|w| w.primary_monitor().ok().flatten())
     {
         let scale = monitor.scale_factor();
         let logical_w = monitor.size().width as f64 / scale;
-        let x = logical_w - OVERLAY_W - 20.0;
-        builder.position(x, 20.0)
+        let logical_h = monitor.size().height as f64 / scale;
+        let x = (logical_w - OVERLAY_W) / 2.0;
+        let y = logical_h - OVERLAY_H - BOTTOM_MARGIN;
+        builder.position(x, y)
     } else {
-        builder.position(1200.0, 20.0)
+        builder.position(600.0, 700.0)
     };
 
     match builder.build() {
