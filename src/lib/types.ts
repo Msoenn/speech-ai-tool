@@ -49,6 +49,7 @@ export interface AppSettings {
   whisper_language: string;
   whisper_api_endpoint: string;
   whisper_api_key: string;
+  whisper_api_model: string;
   llm: LlmConfig;
   auto_paste: boolean;
   paste_shortcut: string;

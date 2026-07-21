@@ -12,6 +12,8 @@ pub struct AppSettings {
     pub whisper_language: String,
     pub whisper_api_endpoint: String,
     pub whisper_api_key: String,
+    #[serde(default = "default_whisper_api_model")]
+    pub whisper_api_model: String,
     pub llm: LlmConfig,
     pub auto_paste: bool,
     #[serde(default = "default_paste_shortcut")]
@@ -21,6 +23,10 @@ pub struct AppSettings {
 
 pub fn default_whisper_language() -> String {
     "en".to_string()
+}
+
+pub fn default_whisper_api_model() -> String {
+    "whisper-1".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -54,6 +60,7 @@ impl Default for AppSettings {
             whisper_language: default_whisper_language(),
             whisper_api_endpoint: String::new(),
             whisper_api_key: String::new(),
+            whisper_api_model: default_whisper_api_model(),
             llm: LlmConfig::default(),
             auto_paste: true,
             paste_shortcut: default_paste_shortcut(),
