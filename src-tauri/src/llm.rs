@@ -96,6 +96,12 @@ struct OllamaChatRequest {
     model: String,
     messages: Vec<ChatMessage>,
     stream: bool,
+    /// Disable "thinking"/reasoning output. For thinking-capable models
+    /// (deepseek-r1, qwen3, gpt-oss, ...) Ollama defaults this to true, which
+    /// generates a hidden reasoning block and makes cleanup substantially
+    /// slower. We never want that for post-processing, so force it off.
+    /// Non-thinking models ignore the flag.
+    think: bool,
 }
 
 #[derive(Serialize)]
@@ -160,6 +166,7 @@ pub async fn cleanup_text(config: &LlmConfig, raw_text: &str) -> Result<String, 
                 model: config.model.clone(),
                 messages,
                 stream: false,
+                think: false,
             };
 
             let resp = client
