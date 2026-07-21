@@ -88,6 +88,16 @@ pub fn load_settings(store: &tauri_plugin_store::Store<tauri::Wry>) -> AppSettin
         _ => settings.whisper_model,
     };
 
+    // Auto-upgrade the cleanup prompt for anyone still on a shipped default
+    // (i.e. they never customized it): if their stored prompt matches any
+    // default we've ever shipped, replace it with the current default. A
+    // customized prompt matches no known default and is left untouched.
+    if settings.llm.system_prompt != crate::llm::DEFAULT_SYSTEM_PROMPT
+        && crate::llm::KNOWN_DEFAULT_PROMPTS.contains(&settings.llm.system_prompt.as_str())
+    {
+        settings.llm.system_prompt = crate::llm::DEFAULT_SYSTEM_PROMPT.to_string();
+    }
+
     settings
 }
 

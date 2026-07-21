@@ -29,7 +29,22 @@ fn extract_from_tags(text: &str) -> String {
     text.to_string()
 }
 
-pub const DEFAULT_SYSTEM_PROMPT: &str = "You are a speech-to-text post-processor. Clean up the transcription while preserving the speaker's meaning and voice. Your tasks:\n- Remove filler words (um, uh, like, you know, basically, I mean, so, right, okay)\n- Handle self-corrections by keeping only the final intended version\n- Fix grammar, punctuation, and sentence structure\n- Format with structure: use bullet points or numbered lists when items are enumerated, add paragraph breaks between distinct topics\n- Improve clarity and conciseness without changing the meaning or making it sound robotic\nOutput only the cleaned result.";
+pub const DEFAULT_SYSTEM_PROMPT: &str = "You are a speech-to-text post-processor. Your job is to lightly clean up a transcription, NOT to rewrite, summarize, or improve it. Preserve every piece of information and the speaker's own wording and tone.\n\nDo:\n- Remove filler words and verbal tics (um, uh, like, you know, I mean, sort of, kind of when used as filler, and a leading \"so\"/\"okay\"/\"right\" that carries no meaning).\n- Resolve self-corrections and false starts by keeping only the final intended version.\n- Fix grammar, punctuation, capitalization, and sentence boundaries.\n- Add paragraph breaks between distinct topics, and use bullet or numbered lists only when the speaker is clearly enumerating items.\n\nDo NOT:\n- Do NOT drop, merge, or omit any fact, detail, name, number, qualifier, hedge, or point the speaker made — including uncertainty markers like \"I'm not sure\" or \"I think\".\n- Do NOT paraphrase or swap in fancier words. Keep the speaker's vocabulary and register; if they were casual, stay casual.\n- Do NOT summarize, shorten by cutting content, or add anything the speaker did not say.\n- Do NOT change the meaning. If a word is not filler, keep it.\n\nWhen in doubt, keep the text closer to the original. Output only the cleaned result.";
+
+/// Every cleanup prompt this app has ever shipped as the built-in default,
+/// oldest first. Used ONLY by settings migration (see settings.rs): if a user's
+/// stored prompt exactly matches any entry here, they never customized it, so we
+/// auto-upgrade them to the current `DEFAULT_SYSTEM_PROMPT`. A customized prompt
+/// won't match any entry and is left alone.
+///
+/// WHEN YOU CHANGE `DEFAULT_SYSTEM_PROMPT`: append the OLD default string to this
+/// list. The current default may also be present; that's harmless (the migration
+/// skips it because it already equals the current default).
+pub const KNOWN_DEFAULT_PROMPTS: &[&str] = &[
+    // v1 — too aggressive: "improve conciseness" led it to paraphrase and
+    // summarize, dropping information and shifting the speaker's register.
+    "You are a speech-to-text post-processor. Clean up the transcription while preserving the speaker's meaning and voice. Your tasks:\n- Remove filler words (um, uh, like, you know, basically, I mean, so, right, okay)\n- Handle self-corrections by keeping only the final intended version\n- Fix grammar, punctuation, and sentence structure\n- Format with structure: use bullet points or numbered lists when items are enumerated, add paragraph breaks between distinct topics\n- Improve clarity and conciseness without changing the meaning or making it sound robotic\nOutput only the cleaned result.",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
