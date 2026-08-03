@@ -9,6 +9,7 @@ import StatusOverlay from "./components/StatusOverlay";
 import { useAppState } from "./hooks/useAppState";
 import { useSettings } from "./hooks/useSettings";
 import { useTauriEvent } from "./hooks/useTauriEvent";
+import { applyPalette, isPaletteId } from "./lib/palettes";
 import {
   isWhisperModelLoaded,
   checkAccessibilityPermission,
@@ -42,6 +43,12 @@ function Dashboard() {
   useEffect(() => {
     isWhisperModelLoaded().then(setModelLoaded).catch(() => setModelLoaded(false));
   }, [page]);
+
+  // Settings is the authoritative palette source; re-apply whenever it changes
+  // (also corrects the localStorage-cached guess from first paint).
+  useEffect(() => {
+    if (isPaletteId(settings?.palette)) applyPalette(settings.palette);
+  }, [settings?.palette]);
 
   useEffect(() => {
     check().then((u) => setUpdate(u)).catch(console.error);

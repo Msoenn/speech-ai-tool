@@ -54,6 +54,7 @@ export interface AppSettings {
   auto_paste: boolean;
   paste_shortcut: string;
   history_max_items: number;
+  palette: string;
 }
 
 export interface PipelineStatusEvent {

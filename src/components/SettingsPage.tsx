@@ -4,6 +4,8 @@ import AudioDeviceSelect from "./AudioDeviceSelect";
 import HotkeyInput from "./HotkeyInput";
 import WhisperSettings from "./WhisperSettings";
 import LlmSettings from "./LlmSettings";
+import ThemePicker from "./ThemePicker";
+import { applyPalette, DEFAULT_PALETTE, type PaletteId } from "../lib/palettes";
 import type { AppSettings } from "../lib/types";
 
 interface SettingsPageProps {
@@ -37,6 +39,18 @@ export default function SettingsPage({ onBack }: SettingsPageProps) {
       {error && (
         <div className="bg-error/10 text-error text-sm rounded px-3 py-2">{error}</div>
       )}
+
+      {/* Appearance */}
+      <section className="bg-surface rounded-lg p-4">
+        <h3 className="text-sm font-medium text-text mb-3">Appearance</h3>
+        <ThemePicker
+          value={settings.palette}
+          onChange={(id: PaletteId) => {
+            applyPalette(id); // instant preview
+            update({ palette: id }); // persist
+          }}
+        />
+      </section>
 
       {/* Audio */}
       <section className="bg-surface rounded-lg p-4">
@@ -130,6 +144,7 @@ export default function SettingsPage({ onBack }: SettingsPageProps) {
             <button
               onClick={() => {
                 resetSettings();
+                applyPalette(DEFAULT_PALETTE);
                 setConfirmReset(false);
               }}
               className="px-3 py-1 text-sm text-white bg-error rounded hover:bg-error-hover transition-colors"
