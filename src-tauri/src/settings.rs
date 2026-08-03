@@ -19,6 +19,13 @@ pub struct AppSettings {
     #[serde(default = "default_paste_shortcut")]
     pub paste_shortcut: String,
     pub history_max_items: usize,
+    /// Color theme id (see src/lib/palettes.ts). Frontend-only preference.
+    #[serde(default = "default_palette")]
+    pub palette: String,
+}
+
+pub fn default_palette() -> String {
+    "slate".to_string()
 }
 
 pub fn default_whisper_language() -> String {
@@ -65,6 +72,7 @@ impl Default for AppSettings {
             auto_paste: true,
             paste_shortcut: default_paste_shortcut(),
             history_max_items: 100,
+            palette: default_palette(),
         }
     }
 }

@@ -23,7 +23,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
     <button
       onClick={handleCopy}
       disabled={!text}
-      className="px-3 py-1 text-xs bg-primary rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
+      className="px-3 py-1 text-xs bg-primary rounded hover:bg-primary-hover disabled:opacity-50 transition-colors"
     >
       {copied ? "Copied!" : label}
     </button>

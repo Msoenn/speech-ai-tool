@@ -7,7 +7,9 @@ import HistoryList from "./components/HistoryList";
 import SettingsPage from "./components/SettingsPage";
 import StatusOverlay from "./components/StatusOverlay";
 import { useAppState } from "./hooks/useAppState";
+import { useSettings } from "./hooks/useSettings";
 import { useTauriEvent } from "./hooks/useTauriEvent";
+import { applyPalette, isPaletteId } from "./lib/palettes";
 import {
   isWhisperModelLoaded,
   checkAccessibilityPermission,
@@ -31,6 +33,7 @@ type Page = "main" | "settings";
 
 function Dashboard() {
   const { status, rawText, cleanedText, error } = useAppState();
+  const { settings } = useSettings();
   const [page, setPage] = useState<Page>("main");
   const [modelLoaded, setModelLoaded] = useState(true);
   const [update, setUpdate] = useState<Update | null>(null);
@@ -40,6 +43,12 @@ function Dashboard() {
   useEffect(() => {
     isWhisperModelLoaded().then(setModelLoaded).catch(() => setModelLoaded(false));
   }, [page]);
+
+  // Settings is the authoritative palette source; re-apply whenever it changes
+  // (also corrects the localStorage-cached guess from first paint).
+  useEffect(() => {
+    if (isPaletteId(settings?.palette)) applyPalette(settings.palette);
+  }, [settings?.palette]);
 
   useEffect(() => {
     check().then((u) => setUpdate(u)).catch(console.error);
@@ -113,7 +122,7 @@ function Dashboard() {
                     await requestAccessibilityPermission();
                     await openAccessibilitySettings();
                   }}
-                  className="px-3 py-1 bg-error hover:bg-red-700 text-white text-xs rounded transition-colors"
+                  className="px-3 py-1 bg-error hover:bg-error-hover text-white text-xs rounded transition-colors"
                 >
                   Grant Access
                 </button>
@@ -136,7 +145,7 @@ function Dashboard() {
           )}
 
           {update && (
-            <div className="bg-blue-900/30 border border-blue-600 text-blue-200 text-sm rounded-lg px-4 py-3 flex items-center justify-between">
+            <div className="bg-primary/10 border border-primary text-accent text-sm rounded-lg px-4 py-3 flex items-center justify-between">
               <span>
                 Update available: v{update.version}
               </span>
@@ -152,22 +161,22 @@ function Dashboard() {
                     setUpdating(false);
                   }
                 }}
-                className="px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs rounded transition-colors"
+                className="px-3 py-1 bg-primary hover:bg-primary-hover disabled:opacity-50 text-white text-xs rounded transition-colors"
               >
                 {updating ? "Installing..." : "Install & Restart"}
               </button>
             </div>
           )}
 
-          {!modelLoaded && (
+          {settings?.whisper_mode === "local" && !modelLoaded && (
             <div
-              className="bg-yellow-900/30 border border-yellow-600 text-yellow-200 text-sm rounded-lg px-4 py-3 flex items-center justify-between cursor-pointer"
+              className="bg-warning/10 border border-warning text-warning text-sm rounded-lg px-4 py-3 flex items-center justify-between cursor-pointer"
               onClick={() => setPage("settings")}
             >
               <span>
                 No whisper model loaded. Go to Settings to download and load a model before transcribing.
               </span>
-              <span className="text-yellow-400 text-xs ml-2">Settings &rarr;</span>
+              <span className="text-warning text-xs ml-2">Settings &rarr;</span>
             </div>
           )}
 
