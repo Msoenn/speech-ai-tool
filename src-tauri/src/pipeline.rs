@@ -140,5 +140,10 @@ pub async fn run_pipeline(app: AppHandle) -> Result<(), AppError> {
     }
     let _ = state.history.prune(settings.history_max_items);
 
+    // Tell the UI to reload the history list. Emitted after the insert (the
+    // Done status above fires before it) so the new record is already present
+    // when the frontend refetches.
+    let _ = app.emit("history-updated", ());
+
     Ok(())
 }

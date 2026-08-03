@@ -4,6 +4,7 @@ import {
   deleteHistoryItem,
   clearHistory as clearHistoryCmd,
 } from "../lib/commands";
+import { useTauriEvent } from "./useTauriEvent";
 import type { TranscriptionRecord } from "../lib/types";
 
 export function useHistory() {
@@ -24,6 +25,11 @@ export function useHistory() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Reload when the backend saves a new transcription, so entries recorded
+  // while the dashboard is open appear immediately (newest-first) instead of
+  // only after a restart.
+  useTauriEvent<unknown>("history-updated", refresh);
 
   const deleteItem = useCallback(
     async (id: string) => {
