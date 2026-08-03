@@ -1,17 +1,21 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #1a1a2e;
-  --color-surface: #16213e;
-  --color-surface-hover: #1a2744;
-  --color-primary: #0f3460;
-  --color-accent: #e94560;
-  --color-text: #eee;
-  --color-text-muted: #999;
+  /* Slate & Teal — cool neutral slate ground with a calm teal accent. */
+  --color-bg: #0e1216;
+  --color-surface: #161c23;
+  --color-surface-hover: #1f2731;
+  --color-primary: #0d9488;
+  --color-primary-hover: #14b8a6;
+  --color-accent: #2dd4bf;
+  --color-text: #e7ecf0;
+  --color-text-muted: #8794a1;
   --color-success: #4ade80;
   --color-warning: #fbbf24;
   --color-error: #f87171;
-  --color-recording: #e94560;
+  --color-error-hover: #ef4444;
+  --color-recording: #fb7185;
+  --color-recording-hover: #f43f5e;
   --color-processing: #fbbf24;
 }
 

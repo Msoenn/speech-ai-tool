@@ -105,7 +105,7 @@ export default function AudioDeviceSelect({ onDeviceChange }: AudioDeviceSelectP
         </p>
         <button
           onClick={enableMicrophone}
-          className="px-4 py-2 rounded text-sm font-medium bg-primary text-white hover:bg-blue-700 transition-colors"
+          className="px-4 py-2 rounded text-sm font-medium bg-primary text-white hover:bg-primary-hover transition-colors"
         >
           Enable microphone access
         </button>
@@ -126,7 +126,7 @@ export default function AudioDeviceSelect({ onDeviceChange }: AudioDeviceSelectP
         <div className="flex items-center gap-2">
           <button
             onClick={() => openMicrophoneSettings()}
-            className="px-4 py-2 rounded text-sm font-medium bg-primary text-white hover:bg-blue-700 transition-colors"
+            className="px-4 py-2 rounded text-sm font-medium bg-primary text-white hover:bg-primary-hover transition-colors"
           >
             Open Settings
           </button>
@@ -164,8 +164,8 @@ export default function AudioDeviceSelect({ onDeviceChange }: AudioDeviceSelectP
           disabled={micPermission !== "granted"}
           className={`px-4 py-2 rounded text-sm font-medium transition-colors disabled:opacity-50 ${
             recording
-              ? "bg-recording text-white hover:bg-red-600 animate-pulse"
-              : "bg-primary text-white hover:bg-blue-700"
+              ? "bg-recording text-white hover:bg-recording-hover animate-pulse"
+              : "bg-primary text-white hover:bg-primary-hover"
           }`}
         >
           {recording ? "Stop" : "Test Microphone"}

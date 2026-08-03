@@ -132,7 +132,7 @@ export default function SettingsPage({ onBack }: SettingsPageProps) {
                 resetSettings();
                 setConfirmReset(false);
               }}
-              className="px-3 py-1 text-sm text-white bg-error rounded hover:bg-red-700 transition-colors"
+              className="px-3 py-1 text-sm text-white bg-error rounded hover:bg-error-hover transition-colors"
             >
               Confirm
             </button>

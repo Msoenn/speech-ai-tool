@@ -73,7 +73,7 @@ export default function HistoryList() {
                         e.stopPropagation();
                         copyToClipboard(record.cleaned_text);
                       }}
-                      className="px-3 py-1 text-xs bg-primary rounded hover:bg-blue-700 transition-colors"
+                      className="px-3 py-1 text-xs bg-primary rounded hover:bg-primary-hover transition-colors"
                     >
                       Copy Cleaned
                     </button>

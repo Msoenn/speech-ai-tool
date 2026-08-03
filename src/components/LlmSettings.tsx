@@ -135,7 +135,7 @@ export default function LlmSettings({ settings, onChange }: LlmSettingsProps) {
             </label>
             <button
               onClick={addExample}
-              className="px-2 py-0.5 text-xs bg-primary rounded hover:bg-blue-700 transition-colors"
+              className="px-2 py-0.5 text-xs bg-primary rounded hover:bg-primary-hover transition-colors"
             >
               + Add
             </button>
@@ -170,7 +170,7 @@ export default function LlmSettings({ settings, onChange }: LlmSettingsProps) {
                     <div className="flex gap-2">
                       <button
                         onClick={saveEdit}
-                        className="px-2 py-0.5 text-xs bg-primary rounded hover:bg-blue-700 transition-colors"
+                        className="px-2 py-0.5 text-xs bg-primary rounded hover:bg-primary-hover transition-colors"
                       >
                         Save
                       </button>
@@ -224,7 +224,7 @@ export default function LlmSettings({ settings, onChange }: LlmSettingsProps) {
           <button
             onClick={handleTest}
             disabled={testing}
-            className="px-4 py-2 text-sm bg-primary rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            className="px-4 py-2 text-sm bg-primary rounded hover:bg-primary-hover disabled:opacity-50 transition-colors"
           >
             {testing ? "Testing..." : "Test Connection"}
           </button>
