@@ -449,7 +449,9 @@ Expected: FAIL — `char_to_keycode`/`paste_modifier_keycode` not defined.
 
 - [ ] **Step 3: Add the injector**
 
-Append to `src-tauri/src/evdev_input.rs` (add these `use` lines at the top of the file first: `use std::sync::atomic::{AtomicBool, Ordering};`, `use std::sync::{Mutex, MutexGuard, OnceLock};`, `use evdev::{AttributeSet, EventType, InputEvent, VirtualDevice};`, `use crate::output::PasteModifier;`):
+Append to `src-tauri/src/evdev_input.rs` (add these `use` lines at the top of the file first: `use std::sync::atomic::{AtomicBool, Ordering};`, `use std::sync::{Mutex, MutexGuard, OnceLock};`, `use evdev::uinput::VirtualDevice;`, `use evdev::{AttributeSet, EventType, InputEvent};`, `use crate::output::PasteModifier;`):
+
+> Correction (verified against evdev 0.13.2 source during execution): `VirtualDevice` lives at `evdev::uinput::VirtualDevice`, not the crate root. `VirtualDevice::emit` takes `&mut self` (so `send_paste_chord` uses `guard.as_mut()`, not `as_ref()`). Letter keycodes are QWERTY-ordered, not consecutive — `char_to_keycode` maps each letter explicitly below.
 
 ```rust
 /// Set while we inject our own keystrokes, so the evdev listener ignores them.
@@ -473,8 +475,38 @@ fn paste_modifier_keycode(m: PasteModifier) -> KeyCode {
 /// Map a single paste key character to its evdev keycode.
 fn char_to_keycode(c: char) -> Result<KeyCode, String> {
     if ('a'..='z').contains(&c) {
-        // KEY_A(30)…KEY_Z(55) are consecutive.
-        return Ok(KeyCode::new(KeyCode::KEY_A.0 + (c as u32 - 'a' as u32) as u16));
+        // Letters are QWERTY-ordered in evdev (KEY_A=30, KEY_B=48, …), so map
+        // each explicitly rather than by arithmetic.
+        let key = match c {
+            'a' => KeyCode::KEY_A,
+            'b' => KeyCode::KEY_B,
+            'c' => KeyCode::KEY_C,
+            'd' => KeyCode::KEY_D,
+            'e' => KeyCode::KEY_E,
+            'f' => KeyCode::KEY_F,
+            'g' => KeyCode::KEY_G,
+            'h' => KeyCode::KEY_H,
+            'i' => KeyCode::KEY_I,
+            'j' => KeyCode::KEY_J,
+            'k' => KeyCode::KEY_K,
+            'l' => KeyCode::KEY_L,
+            'm' => KeyCode::KEY_M,
+            'n' => KeyCode::KEY_N,
+            'o' => KeyCode::KEY_O,
+            'p' => KeyCode::KEY_P,
+            'q' => KeyCode::KEY_Q,
+            'r' => KeyCode::KEY_R,
+            's' => KeyCode::KEY_S,
+            't' => KeyCode::KEY_T,
+            'u' => KeyCode::KEY_U,
+            'v' => KeyCode::KEY_V,
+            'w' => KeyCode::KEY_W,
+            'x' => KeyCode::KEY_X,
+            'y' => KeyCode::KEY_Y,
+            'z' => KeyCode::KEY_Z,
+            _ => unreachable!(),
+        };
+        return Ok(key);
     }
     if ('0'..='9').contains(&c) {
         // KEY_1(2)…KEY_9(10) are consecutive; KEY_0(11) is separate.
@@ -535,8 +567,8 @@ fn get_virtual_device() -> Result<MutexGuard<'static, Option<VirtualDevice>>, St
 /// so the evdev listener ignores these synthetic events.
 pub(crate) fn send_paste_chord(modifiers: &[PasteModifier], key: char) -> Result<(), String> {
     let keycode = char_to_keycode(key)?;
-    let guard = get_virtual_device()?;
-    let device = guard.as_ref().expect("virtual device created on first paste");
+    let mut guard = get_virtual_device()?;
+    let device = guard.as_mut().expect("virtual device created on first paste");
 
     let press: Vec<InputEvent> = modifiers
         .iter()
