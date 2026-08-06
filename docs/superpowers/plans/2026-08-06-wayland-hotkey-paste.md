@@ -779,6 +779,10 @@ pub fn ensure_listener(app: &AppHandle, state: &Arc<HotkeyState>) {
         // Shared event handler: tracks held keys and triggers the combo. It is
         // behind an Arc<Mutex> because the evdev listener runs one thread per
         // keyboard device, all feeding the same handler.
+        // `app_for_handler` is a clone: the handler closure moves its captured
+        // values, while the fallback block below still needs `app_handle` for
+        // the Wayland warning emit. (Compile fix, verified.)
+        let app_for_handler = app_handle.clone();
         let held_keys: Arc<Mutex<HashSet<Key>>> = Arc::new(Mutex::new(HashSet::new()));
         let handler: Arc<Mutex<Box<dyn FnMut(EventType) + Send>>> = Arc::new(Mutex::new(Box::new(
             move |event_type: EventType| {
@@ -790,11 +794,11 @@ pub fn ensure_listener(app: &AppHandle, state: &Arc<HotkeyState>) {
                 match event_type {
                     EventType::KeyPress(key) => {
                         held.insert(key);
-                        check_combo(&held, &state_clone, &app_handle);
+                        check_combo(&held, &state_clone, &app_for_handler);
                     }
                     EventType::KeyRelease(key) => {
                         held.remove(&key);
-                        check_combo(&held, &state_clone, &app_handle);
+                        check_combo(&held, &state_clone, &app_for_handler);
                     }
                     _ => {}
                 }
