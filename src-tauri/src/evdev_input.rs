@@ -205,23 +205,40 @@ fn char_to_keycode(c: char) -> Result<KeyCode, String> {
     Ok(key)
 }
 
+/// Every keycode the paste injector can emit, declared to uinput. The Linux
+/// input core silently drops `EV_KEY` events whose code is absent from the
+/// device's keybit, so this MUST cover everything `char_to_keycode` and
+/// `paste_modifier_keycode` can return.
+fn paste_keycapabilities() -> AttributeSet<KeyCode> {
+    let mut keys: AttributeSet<KeyCode> = AttributeSet::new();
+    for c in 'a'..='z' {
+        if let Ok(code) = char_to_keycode(c) {
+            keys.insert(code);
+        }
+    }
+    for c in '0'..='9' {
+        if let Ok(code) = char_to_keycode(c) {
+            keys.insert(code);
+        }
+    }
+    for c in [' ', '-', '=', '[', ']', '\\', ';', '\'', '`', ',', '.', '/'] {
+        if let Ok(code) = char_to_keycode(c) {
+            keys.insert(code);
+        }
+    }
+    for m in [PasteModifier::Control, PasteModifier::Shift, PasteModifier::Alt, PasteModifier::Meta] {
+        keys.insert(paste_modifier_keycode(m));
+    }
+    keys
+}
+
 /// Lazily create the virtual keyboard on `/dev/uinput` and keep it alive.
 fn get_virtual_device() -> Result<MutexGuard<'static, Option<VirtualDevice>>, String> {
     static DEVICE: OnceLock<Mutex<Option<VirtualDevice>>> = OnceLock::new();
     let mtx = DEVICE.get_or_init(|| Mutex::new(None));
     let mut guard = mtx.lock().unwrap();
     if guard.is_none() {
-        let keys: AttributeSet<KeyCode> = [
-            KeyCode::KEY_LEFTCTRL, KeyCode::KEY_LEFTSHIFT, KeyCode::KEY_LEFTALT, KeyCode::KEY_LEFTMETA,
-            KeyCode::KEY_A, KeyCode::KEY_Z,
-            KeyCode::KEY_0, KeyCode::KEY_9,
-            KeyCode::KEY_SPACE, KeyCode::KEY_MINUS, KeyCode::KEY_EQUAL,
-            KeyCode::KEY_LEFTBRACE, KeyCode::KEY_RIGHTBRACE, KeyCode::KEY_BACKSLASH,
-            KeyCode::KEY_SEMICOLON, KeyCode::KEY_APOSTROPHE, KeyCode::KEY_GRAVE,
-            KeyCode::KEY_COMMA, KeyCode::KEY_DOT, KeyCode::KEY_SLASH,
-        ]
-        .into_iter()
-        .collect();
+        let keys = paste_keycapabilities();
         let dev = VirtualDevice::builder()
             .map_err(|e| format!("failed to open /dev/uinput: {}", e))?
             .name("speech-ai-tool-paste")
@@ -333,5 +350,23 @@ mod tests {
     fn maps_paste_modifier_to_keycode() {
         assert_eq!(paste_modifier_keycode(PasteModifier::Control).0, KeyCode::KEY_LEFTCTRL.0);
         assert_eq!(paste_modifier_keycode(PasteModifier::Meta).0, KeyCode::KEY_LEFTMETA.0);
+    }
+
+    #[test]
+    fn capabilities_cover_every_emittable_key() {
+        let caps = paste_keycapabilities();
+        for c in ('a'..='z').chain('0'..='9') {
+            if let Ok(code) = char_to_keycode(c) {
+                assert!(caps.contains(code), "no capability for key char {}", c);
+            }
+        }
+        for c in [' ', '-', '=', '[', ']', '\\', ';', '\'', '`', ',', '.', '/'] {
+            if let Ok(code) = char_to_keycode(c) {
+                assert!(caps.contains(code), "no capability for punctuation {}", c);
+            }
+        }
+        for m in [PasteModifier::Control, PasteModifier::Shift, PasteModifier::Alt, PasteModifier::Meta] {
+            assert!(caps.contains(paste_modifier_keycode(m)), "no capability for modifier");
+        }
     }
 }
