@@ -346,26 +346,13 @@ fn parse_paste_shortcut(shortcut: &str) -> Result<(Vec<PasteModifier>, char), Ap
 }
 ```
 
-- [ ] **Step 4: Split `press_paste_chord` into enigo and uinput paths**
+- [ ] **Step 4: Rework `press_paste_chord` to the neutral types**
 
-Replace the existing `press_paste_chord` (currently builds an `enigo::Enigo` directly) with a dispatcher plus a renamed enigo implementation:
+Replace the existing `press_paste_chord` (currently takes `&[enigo::Key], enigo::Key`) so it takes the neutral `&[PasteModifier], char` and converts internally. It stays fully enigo-based on every platform for now — Task 3 switches the Linux branch to uinput:
 
 ```rust
-/// Synthesize the paste chord (modifiers + key).
+/// Synthesize the paste chord (modifiers + key) via enigo.
 fn press_paste_chord(modifiers: &[PasteModifier], char_key: char) -> Result<(), String> {
-    #[cfg(target_os = "linux")]
-    {
-        crate::evdev_input::send_paste_chord(modifiers, char_key)
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        press_paste_chord_enigo(modifiers, char_key)
-    }
-}
-
-/// enigo-based injection for macOS and Windows (kept unchanged in behavior).
-#[cfg(not(target_os = "linux"))]
-fn press_paste_chord_enigo(modifiers: &[PasteModifier], char_key: char) -> Result<(), String> {
     use enigo::{Direction, Enigo, Key as EnigoKey, Keyboard, Settings};
 
     fn enigo_key_for(m: PasteModifier) -> EnigoKey {
@@ -431,7 +418,7 @@ git commit -m "feat(paste): platform-neutral paste-shortcut parsing for Wayland 
 
 **Interfaces:**
 - Consumes: `crate::output::PasteModifier` (Task 2).
-- Produces: `pub(crate) fn send_paste_chord(modifiers: &[PasteModifier], key: char) -> Result<(), String>` (consumed by Task 2's `press_paste_chord` Linux branch) and `pub(crate) fn suppressing_self_injection() -> bool` (consumed by Task 4's listener and Task 5's hotkey handler).
+- Produces: `pub(crate) fn send_paste_chord(modifiers: &[PasteModifier], key: char) -> Result<(), String>` (wired into `press_paste_chord`'s Linux branch in Step 5) and `pub(crate) fn suppressing_self_injection() -> bool` (consumed by Task 4's listener and Task 5's hotkey handler).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -548,7 +535,8 @@ fn get_virtual_device() -> Result<MutexGuard<'static, Option<VirtualDevice>>, St
 /// so the evdev listener ignores these synthetic events.
 pub(crate) fn send_paste_chord(modifiers: &[PasteModifier], key: char) -> Result<(), String> {
     let keycode = char_to_keycode(key)?;
-    let mut device = get_virtual_device()?;
+    let guard = get_virtual_device()?;
+    let device = guard.as_ref().expect("virtual device created on first paste");
 
     let press: Vec<InputEvent> = modifiers
         .iter()
@@ -588,15 +576,43 @@ pub(crate) fn send_paste_chord(modifiers: &[PasteModifier], key: char) -> Result
 Run: `cargo test -p speech-ai-tool evdev --manifest-path src-tauri/Cargo.toml`
 Expected: PASS (5 tests).
 
-- [ ] **Step 5: Verify the crate still compiles with the Linux paste branch**
+- [ ] **Step 5: Wire `send_paste_chord` into `press_paste_chord`'s Linux branch**
+
+In `src-tauri/src/output.rs`, the `press_paste_chord` function (created in Task 2, still enigo on all platforms) must become a dispatcher. Edit it so the file reads:
+
+```rust
+/// Synthesize the paste chord (modifiers + key).
+fn press_paste_chord(modifiers: &[PasteModifier], char_key: char) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        crate::evdev_input::send_paste_chord(modifiers, char_key)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        press_paste_chord_enigo(modifiers, char_key)
+    }
+}
+
+/// enigo-based injection for macOS and Windows (kept unchanged in behavior).
+#[cfg(not(target_os = "linux"))]
+fn press_paste_chord_enigo(modifiers: &[PasteModifier], char_key: char) -> Result<(), String> {
+    // Move the entire enigo body from the current `press_paste_chord` here,
+    // unchanged — including its `use enigo::{...}` import and the nested
+    // `fn enigo_key_for(...)`.
+}
+```
+
+That is: rename the existing function to `press_paste_chord_enigo`, gate it with `#[cfg(not(target_os = "linux"))]`, and add the two-branch dispatcher above it.
+
+- [ ] **Step 6: Verify the crate compiles on Linux**
 
 Run: `cargo check -p speech-ai-tool --manifest-path src-tauri/Cargo.toml`
-Expected: no errors (the `press_paste_chord` Linux branch references `crate::evdev_input::send_paste_chord`).
+Expected: no errors (the Linux branch resolves `crate::evdev_input::send_paste_chord`).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src-tauri/src/evdev_input.rs
+git add src-tauri/src/evdev_input.rs src-tauri/src/output.rs
 git commit -m "feat(paste): uinput-based key injection for native Wayland paste"
 ```
 
