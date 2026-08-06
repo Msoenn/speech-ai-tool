@@ -688,8 +688,10 @@ pub(crate) fn listen(
         Arc::new(Mutex::new(Box::new(callback)));
 
     let mut opened = 0usize;
-    for device in evdev::enumerate() {
-        let Ok(mut device) = device else { continue };
+    // `evdev::enumerate()` yields `(PathBuf, Device)` pairs; the crate's raw
+    // iterator already skips devices that fail to open, so no Result handling
+    // is needed here. (Correction verified against evdev 0.13.2 source.)
+    for (_, mut device) in evdev::enumerate() {
         if !is_keyboard(&device) {
             continue;
         }
