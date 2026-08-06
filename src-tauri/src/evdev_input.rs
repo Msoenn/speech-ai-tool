@@ -335,7 +335,8 @@ pub(crate) fn listen(
                             0 => rdev::EventType::KeyRelease(key),
                             _ => continue, // autorepeat
                         };
-                        (cb.lock().unwrap())(event_type);
+                        let Ok(mut cb) = cb.lock() else { continue };
+                        (cb)(event_type);
                     }
                 }
                 Err(e) => {

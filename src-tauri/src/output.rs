@@ -106,11 +106,20 @@ fn simulate_paste(app: &tauri::AppHandle, paste_shortcut: &str) -> Result<(), Ap
     }
 }
 
-/// Synthesize the paste chord (modifiers + key).
+/// Synthesize the paste chord (modifiers + key). On Linux the uinput injector
+/// is primary; if it fails (e.g. the user isn't in the `input` group and can't
+/// open /dev/uinput), fall back to enigo — on X11 that reaches the window,
+/// on native Wayland it fails harmlessly and the text stays in the clipboard.
 fn press_paste_chord(modifiers: &[PasteModifier], char_key: char) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
-        crate::evdev_input::send_paste_chord(modifiers, char_key)
+        match crate::evdev_input::send_paste_chord(modifiers, char_key) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                eprintln!("uinput paste failed ({}); falling back to enigo", e);
+                press_paste_chord_enigo(modifiers, char_key)
+            }
+        }
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -118,8 +127,7 @@ fn press_paste_chord(modifiers: &[PasteModifier], char_key: char) -> Result<(), 
     }
 }
 
-/// enigo-based injection for macOS and Windows (kept unchanged in behavior).
-#[cfg(not(target_os = "linux"))]
+/// enigo-based injection (kept unchanged in behavior).
 fn press_paste_chord_enigo(modifiers: &[PasteModifier], char_key: char) -> Result<(), String> {
     use enigo::{Direction, Enigo, Key as EnigoKey, Keyboard, Settings};
 

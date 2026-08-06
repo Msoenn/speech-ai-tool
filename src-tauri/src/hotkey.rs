@@ -41,7 +41,12 @@ impl HotkeyState {
 ///
 /// On macOS we use a direct CGEvent tap (see `macos_event_tap`) to avoid
 /// rdev's `TSMGetInputSourceProperty` call, which crashes on macOS 26.3+
-/// when invoked from a background thread.  On other platforms we use `rdev::listen`.
+/// when invoked from a background thread. On Linux we listen via evdev first
+/// (one detached reader thread per keyboard device; `evdev_input::listen`
+/// returns as soon as they are up, so `listener_running` clears almost
+/// immediately — Linux calls this once at app setup), falling back to
+/// `rdev::listen` if evdev is unavailable. On other platforms we use
+/// `rdev::listen`.
 pub fn ensure_listener(app: &AppHandle, state: &Arc<HotkeyState>) {
     if state.listener_running.swap(true, Ordering::SeqCst) {
         return; // already running
@@ -84,7 +89,8 @@ pub fn ensure_listener(app: &AppHandle, state: &Arc<HotkeyState>) {
         #[cfg(target_os = "macos")]
         {
             crate::macos_event_tap::listen(move |event_type| {
-                (handler.lock().unwrap())(event_type);
+                let Ok(mut h) = handler.lock() else { return };
+                (h)(event_type);
             });
         }
 
@@ -92,7 +98,10 @@ pub fn ensure_listener(app: &AppHandle, state: &Arc<HotkeyState>) {
         {
             let is_wayland = std::env::var("XDG_SESSION_TYPE").as_deref() == Ok("wayland");
             let evdev_cb = Arc::clone(&handler);
-            if let Err(e) = crate::evdev_input::listen(move |et| (evdev_cb.lock().unwrap())(et)) {
+            if let Err(e) = crate::evdev_input::listen(move |et| {
+                let Ok(mut h) = evdev_cb.lock() else { return };
+                (h)(et);
+            }) {
                 eprintln!("evdev listener unavailable: {}", e);
                 // On Wayland the rdev fallback only works while the window is
                 // focused, so tell the user what to do rather than fail silently.
@@ -112,7 +121,10 @@ pub fn ensure_listener(app: &AppHandle, state: &Arc<HotkeyState>) {
                     );
                 }
                 let rdev_cb = Arc::clone(&handler);
-                if let Err(e2) = rdev::listen(move |ev| (rdev_cb.lock().unwrap())(ev.event_type)) {
+                if let Err(e2) = rdev::listen(move |ev| {
+                    let Ok(mut h) = rdev_cb.lock() else { return };
+                    (h)(ev.event_type);
+                }) {
                     eprintln!("rdev listener error: {:?}", e2);
                 }
             }
@@ -121,7 +133,10 @@ pub fn ensure_listener(app: &AppHandle, state: &Arc<HotkeyState>) {
         #[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]
         {
             let cb = Arc::clone(&handler);
-            if let Err(e) = rdev::listen(move |ev| (cb.lock().unwrap())(ev.event_type)) {
+            if let Err(e) = rdev::listen(move |ev| {
+                let Ok(mut h) = cb.lock() else { return };
+                (h)(ev.event_type);
+            }) {
                 eprintln!("rdev listener error: {:?}", e);
             }
         }
