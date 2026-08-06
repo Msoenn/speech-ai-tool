@@ -7,7 +7,7 @@
 
 use evdev::KeyCode;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use evdev::{uinput::VirtualDevice, AttributeSet, EventType, InputEvent};
 use crate::output::PasteModifier;
 
@@ -289,6 +289,70 @@ pub(crate) fn send_paste_chord(modifiers: &[PasteModifier], key: char) -> Result
     std::thread::sleep(std::time::Duration::from_millis(30));
     SELF_INJECTING.store(false, Ordering::Relaxed);
     result
+}
+
+/// True if the device looks like a keyboard (reports a letter key).
+fn is_keyboard(device: &evdev::Device) -> bool {
+    device
+        .supported_keys()
+        .map_or(false, |keys| keys.contains(KeyCode::KEY_A))
+}
+
+/// Listen for global key events on all keyboard devices. Each device gets its
+/// own reader thread; `fetch_events` blocks, so no polling is needed. Events
+/// are mapped to `rdev::EventType` and forwarded to `callback`.
+///
+/// Returns `Err` only if no readable keyboard device could be opened (e.g. the
+/// user is not in the `input` group).
+pub(crate) fn listen(
+    callback: impl FnMut(rdev::EventType) + Send + 'static,
+) -> Result<(), String> {
+    let callback: Arc<Mutex<Box<dyn FnMut(rdev::EventType) + Send>>> =
+        Arc::new(Mutex::new(Box::new(callback)));
+
+    let mut opened = 0usize;
+    for (_, mut device) in evdev::enumerate() {
+        if !is_keyboard(&device) {
+            continue;
+        }
+        opened += 1;
+        let cb = Arc::clone(&callback);
+        std::thread::spawn(move || loop {
+            match device.fetch_events() {
+                Ok(events) => {
+                    for event in events {
+                        if event.event_type() != EventType::KEY {
+                            continue;
+                        }
+                        if SELF_INJECTING.load(Ordering::Relaxed) {
+                            continue;
+                        }
+                        let Some(key) = evdev_to_rdev_key(event.code()) else {
+                            continue;
+                        };
+                        let event_type = match event.value() {
+                            1 => rdev::EventType::KeyPress(key),
+                            0 => rdev::EventType::KeyRelease(key),
+                            _ => continue, // autorepeat
+                        };
+                        (cb.lock().unwrap())(event_type);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("evdev device read error: {} (device removed?)", e);
+                    break;
+                }
+            }
+        });
+    }
+
+    if opened == 0 {
+        return Err(
+            "no readable keyboard devices in /dev/input (is your user in the 'input' group?)"
+                .into(),
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]
