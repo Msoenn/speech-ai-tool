@@ -6,6 +6,10 @@
 //! fires while the app window is focused.
 
 use evdev::KeyCode;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, MutexGuard, OnceLock};
+use evdev::{uinput::VirtualDevice, AttributeSet, EventType, InputEvent};
+use crate::output::PasteModifier;
 
 /// Map a Linux input keycode (evdev) to the `rdev::Key` used throughout the app.
 /// Mirrors the keys accepted by `hotkey::parse_hotkey_string`.
@@ -123,9 +127,157 @@ pub(crate) fn evdev_to_rdev_key(code: u16) -> Option<rdev::Key> {
     }
 }
 
+/// Set while we inject our own keystrokes, so the evdev listener ignores them.
+static SELF_INJECTING: AtomicBool = AtomicBool::new(false);
+
+/// True while the app is injecting its own keys (paste chord).
+pub(crate) fn suppressing_self_injection() -> bool {
+    SELF_INJECTING.load(Ordering::Relaxed)
+}
+
+/// Map a paste modifier to the evdev keycode for the left-hand variant.
+fn paste_modifier_keycode(m: PasteModifier) -> KeyCode {
+    match m {
+        PasteModifier::Control => KeyCode::KEY_LEFTCTRL,
+        PasteModifier::Shift => KeyCode::KEY_LEFTSHIFT,
+        PasteModifier::Alt => KeyCode::KEY_LEFTALT,
+        PasteModifier::Meta => KeyCode::KEY_LEFTMETA,
+    }
+}
+
+/// Map a single paste key character to its evdev keycode.
+fn char_to_keycode(c: char) -> Result<KeyCode, String> {
+    if ('a'..='z').contains(&c) {
+        // Letter keycodes follow the QWERTY layout, not alphabetical order
+        // (KEY_A=30, KEY_B=48, …), so map each letter explicitly.
+        return Ok(match c {
+            'a' => KeyCode::KEY_A,
+            'b' => KeyCode::KEY_B,
+            'c' => KeyCode::KEY_C,
+            'd' => KeyCode::KEY_D,
+            'e' => KeyCode::KEY_E,
+            'f' => KeyCode::KEY_F,
+            'g' => KeyCode::KEY_G,
+            'h' => KeyCode::KEY_H,
+            'i' => KeyCode::KEY_I,
+            'j' => KeyCode::KEY_J,
+            'k' => KeyCode::KEY_K,
+            'l' => KeyCode::KEY_L,
+            'm' => KeyCode::KEY_M,
+            'n' => KeyCode::KEY_N,
+            'o' => KeyCode::KEY_O,
+            'p' => KeyCode::KEY_P,
+            'q' => KeyCode::KEY_Q,
+            'r' => KeyCode::KEY_R,
+            's' => KeyCode::KEY_S,
+            't' => KeyCode::KEY_T,
+            'u' => KeyCode::KEY_U,
+            'v' => KeyCode::KEY_V,
+            'w' => KeyCode::KEY_W,
+            'x' => KeyCode::KEY_X,
+            'y' => KeyCode::KEY_Y,
+            'z' => KeyCode::KEY_Z,
+            _ => unreachable!("guarded by 'a'..='z' range"),
+        });
+    }
+    if ('0'..='9').contains(&c) {
+        // KEY_1(2)…KEY_9(10) are consecutive; KEY_0(11) is separate.
+        if c == '0' {
+            return Ok(KeyCode::KEY_0);
+        }
+        return Ok(KeyCode::new(KeyCode::KEY_1.0 + (c as u32 - '1' as u32) as u16));
+    }
+    let key = match c {
+        ' ' => KeyCode::KEY_SPACE,
+        '-' => KeyCode::KEY_MINUS,
+        '=' => KeyCode::KEY_EQUAL,
+        '[' => KeyCode::KEY_LEFTBRACE,
+        ']' => KeyCode::KEY_RIGHTBRACE,
+        '\\' => KeyCode::KEY_BACKSLASH,
+        ';' => KeyCode::KEY_SEMICOLON,
+        '\'' => KeyCode::KEY_APOSTROPHE,
+        '`' => KeyCode::KEY_GRAVE,
+        ',' => KeyCode::KEY_COMMA,
+        '.' => KeyCode::KEY_DOT,
+        '/' => KeyCode::KEY_SLASH,
+        _ => return Err(format!("unsupported paste key: {}", c)),
+    };
+    Ok(key)
+}
+
+/// Lazily create the virtual keyboard on `/dev/uinput` and keep it alive.
+fn get_virtual_device() -> Result<MutexGuard<'static, Option<VirtualDevice>>, String> {
+    static DEVICE: OnceLock<Mutex<Option<VirtualDevice>>> = OnceLock::new();
+    let mtx = DEVICE.get_or_init(|| Mutex::new(None));
+    let mut guard = mtx.lock().unwrap();
+    if guard.is_none() {
+        let keys: AttributeSet<KeyCode> = [
+            KeyCode::KEY_LEFTCTRL, KeyCode::KEY_LEFTSHIFT, KeyCode::KEY_LEFTALT, KeyCode::KEY_LEFTMETA,
+            KeyCode::KEY_A, KeyCode::KEY_Z,
+            KeyCode::KEY_0, KeyCode::KEY_9,
+            KeyCode::KEY_SPACE, KeyCode::KEY_MINUS, KeyCode::KEY_EQUAL,
+            KeyCode::KEY_LEFTBRACE, KeyCode::KEY_RIGHTBRACE, KeyCode::KEY_BACKSLASH,
+            KeyCode::KEY_SEMICOLON, KeyCode::KEY_APOSTROPHE, KeyCode::KEY_GRAVE,
+            KeyCode::KEY_COMMA, KeyCode::KEY_DOT, KeyCode::KEY_SLASH,
+        ]
+        .into_iter()
+        .collect();
+        let dev = VirtualDevice::builder()
+            .map_err(|e| format!("failed to open /dev/uinput: {}", e))?
+            .name("speech-ai-tool-paste")
+            .with_keys(&keys)
+            .map_err(|e| format!("failed to configure uinput device: {}", e))?
+            .build()
+            .map_err(|e| format!("failed to create uinput device: {}", e))?;
+        *guard = Some(dev);
+    }
+    Ok(guard)
+}
+
+/// Inject a paste chord (modifiers + key) through a virtual keyboard. Works on
+/// native Wayland apps, XWayland apps, and X11. Sets the self-injection flag
+/// so the evdev listener ignores these synthetic events.
+pub(crate) fn send_paste_chord(modifiers: &[PasteModifier], key: char) -> Result<(), String> {
+    let keycode = char_to_keycode(key)?;
+    let mut guard = get_virtual_device()?;
+    let device = guard.as_mut().expect("virtual device created on first paste");
+
+    let press: Vec<InputEvent> = modifiers
+        .iter()
+        .map(|m| InputEvent::new(EventType::KEY.0, paste_modifier_keycode(*m).0, 1))
+        .chain(std::iter::once(InputEvent::new(EventType::KEY.0, keycode.0, 1)))
+        .collect();
+    let release: Vec<InputEvent> = std::iter::once(InputEvent::new(EventType::KEY.0, keycode.0, 0))
+        .chain(
+            modifiers
+                .iter()
+                .rev()
+                .map(|m| InputEvent::new(EventType::KEY.0, paste_modifier_keycode(*m).0, 0)),
+        )
+        .collect();
+
+    SELF_INJECTING.store(true, Ordering::Relaxed);
+    let result = (|| -> Result<(), String> {
+        device
+            .emit(&press)
+            .map_err(|e| format!("uinput press failed: {}", e))?;
+        std::thread::sleep(std::time::Duration::from_millis(15));
+        device
+            .emit(&release)
+            .map_err(|e| format!("uinput release failed: {}", e))?;
+        Ok(())
+    })();
+    // Let in-flight injected events drain while the flag is still set so the
+    // listener skips them rather than racing the flag clear.
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    SELF_INJECTING.store(false, Ordering::Relaxed);
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::output::PasteModifier;
 
     #[test]
     fn maps_right_alt_to_altgr() {
@@ -167,5 +319,19 @@ mod tests {
     #[test]
     fn unknown_code_is_none() {
         assert_eq!(evdev_to_rdev_key(0xFFFF), None);
+    }
+
+    #[test]
+    fn maps_paste_char_to_keycode() {
+        assert_eq!(char_to_keycode('v'), Ok(KeyCode::KEY_V));
+        assert_eq!(char_to_keycode('0'), Ok(KeyCode::KEY_0));
+        assert_eq!(char_to_keycode(';'), Ok(KeyCode::KEY_SEMICOLON));
+        assert!(char_to_keycode('!').is_err());
+    }
+
+    #[test]
+    fn maps_paste_modifier_to_keycode() {
+        assert_eq!(paste_modifier_keycode(PasteModifier::Control).0, KeyCode::KEY_LEFTCTRL.0);
+        assert_eq!(paste_modifier_keycode(PasteModifier::Meta).0, KeyCode::KEY_LEFTMETA.0);
     }
 }

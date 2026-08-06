@@ -106,8 +106,21 @@ fn simulate_paste(app: &tauri::AppHandle, paste_shortcut: &str) -> Result<(), Ap
     }
 }
 
-/// Synthesize the paste chord (modifiers + key) via enigo.
+/// Synthesize the paste chord (modifiers + key).
 fn press_paste_chord(modifiers: &[PasteModifier], char_key: char) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        crate::evdev_input::send_paste_chord(modifiers, char_key)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        press_paste_chord_enigo(modifiers, char_key)
+    }
+}
+
+/// enigo-based injection for macOS and Windows (kept unchanged in behavior).
+#[cfg(not(target_os = "linux"))]
+fn press_paste_chord_enigo(modifiers: &[PasteModifier], char_key: char) -> Result<(), String> {
     use enigo::{Direction, Enigo, Key as EnigoKey, Keyboard, Settings};
 
     fn enigo_key_for(m: PasteModifier) -> EnigoKey {
