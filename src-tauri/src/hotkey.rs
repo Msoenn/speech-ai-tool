@@ -52,31 +52,76 @@ pub fn ensure_listener(app: &AppHandle, state: &Arc<HotkeyState>) {
     let app_handle = app.clone();
 
     thread::spawn(move || {
-        let mut held_keys: HashSet<Key> = HashSet::new();
-
-        // `mut` is used by the rdev path below; on macOS the closure is moved
-        // into the event tap without being called through this binding.
-        #[cfg_attr(target_os = "macos", allow(unused_mut))]
-        let mut handle_event = move |event_type: EventType| match event_type {
-            EventType::KeyPress(key) => {
-                held_keys.insert(key);
-                check_combo(&held_keys, &state_clone, &app_handle);
-            }
-            EventType::KeyRelease(key) => {
-                held_keys.remove(&key);
-                check_combo(&held_keys, &state_clone, &app_handle);
-            }
-            _ => {}
-        };
+        // Shared event handler: tracks held keys and triggers the combo. It is
+        // behind an Arc<Mutex> because the evdev listener runs one thread per
+        // keyboard device, all feeding the same handler.
+        // `app_for_handler` is a clone: the handler closure moves its captured
+        // values, while the fallback block below still needs `app_handle` for
+        // the Wayland warning emit. (Compile fix, verified.)
+        let app_for_handler = app_handle.clone();
+        let held_keys: Arc<Mutex<HashSet<Key>>> = Arc::new(Mutex::new(HashSet::new()));
+        let handler: Arc<Mutex<Box<dyn FnMut(EventType) + Send>>> = Arc::new(Mutex::new(Box::new(
+            move |event_type: EventType| {
+                #[cfg(target_os = "linux")]
+                if crate::evdev_input::suppressing_self_injection() {
+                    return;
+                }
+                let mut held = held_keys.lock().unwrap();
+                match event_type {
+                    EventType::KeyPress(key) => {
+                        held.insert(key);
+                        check_combo(&held, &state_clone, &app_for_handler);
+                    }
+                    EventType::KeyRelease(key) => {
+                        held.remove(&key);
+                        check_combo(&held, &state_clone, &app_for_handler);
+                    }
+                    _ => {}
+                }
+            },
+        )));
 
         #[cfg(target_os = "macos")]
         {
-            crate::macos_event_tap::listen(handle_event);
+            crate::macos_event_tap::listen(move |event_type| {
+                (handler.lock().unwrap())(event_type);
+            });
         }
 
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "linux")]
         {
-            if let Err(e) = rdev::listen(move |event| handle_event(event.event_type)) {
+            let is_wayland = std::env::var("XDG_SESSION_TYPE").as_deref() == Ok("wayland");
+            let evdev_cb = Arc::clone(&handler);
+            if let Err(e) = crate::evdev_input::listen(move |et| (evdev_cb.lock().unwrap())(et)) {
+                eprintln!("evdev listener unavailable: {}", e);
+                // On Wayland the rdev fallback only works while the window is
+                // focused, so tell the user what to do rather than fail silently.
+                if is_wayland {
+                    let _ = app_handle.emit(
+                        "pipeline-status",
+                        PipelineStatusEvent {
+                            status: PipelineStatus::Error,
+                            raw_text: None,
+                            cleaned_text: None,
+                            error: Some(format!(
+                                "Global hotkey will only work while this window is focused: \
+                                 evdev could not read input devices ({e}). Add your user to the \
+                                 'input' group (sudo usermod -aG input $USER), then log out and back in."
+                            )),
+                        },
+                    );
+                }
+                let rdev_cb = Arc::clone(&handler);
+                if let Err(e2) = rdev::listen(move |ev| (rdev_cb.lock().unwrap())(ev.event_type)) {
+                    eprintln!("rdev listener error: {:?}", e2);
+                }
+            }
+        }
+
+        #[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]
+        {
+            let cb = Arc::clone(&handler);
+            if let Err(e) = rdev::listen(move |ev| (cb.lock().unwrap())(ev.event_type)) {
                 eprintln!("rdev listener error: {:?}", e);
             }
         }
