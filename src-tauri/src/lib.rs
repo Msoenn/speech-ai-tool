@@ -1,5 +1,7 @@
 mod audio;
 mod error;
+#[cfg(target_os = "linux")]
+mod evdev_input;
 mod history;
 mod hotkey;
 #[cfg(target_os = "macos")]
