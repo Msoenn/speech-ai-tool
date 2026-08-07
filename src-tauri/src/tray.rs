@@ -100,6 +100,11 @@ const OVERLAY_H: f64 = 44.0;
 pub fn show_overlay(app: &AppHandle) {
     let state = app.state::<crate::AppState>();
     if !state.settings.lock().unwrap().show_overlay {
+        // Setting turned off — don't leave a previously-created overlay
+        // visible (e.g. it was shown but an error path never hid it).
+        if let Some(window) = app.get_webview_window("status-overlay") {
+            let _ = window.hide();
+        }
         return;
     }
 

@@ -98,7 +98,7 @@ pub fn ensure_listener(app: &AppHandle, state: &Arc<HotkeyState>) {
 
         #[cfg(target_os = "linux")]
         {
-            let is_wayland = std::env::var("XDG_SESSION_TYPE").as_deref() == Ok("wayland");
+            let is_wayland = crate::settings::is_wayland_session();
             let evdev_cb = Arc::clone(&handler);
             if let Err(e) = crate::evdev_input::listen(move |et| {
                 let Ok(mut h) = evdev_cb.lock() else { return };
