@@ -98,6 +98,11 @@ const OVERLAY_W: f64 = 200.0;
 const OVERLAY_H: f64 = 44.0;
 
 pub fn show_overlay(app: &AppHandle) {
+    let state = app.state::<crate::AppState>();
+    if !state.settings.lock().unwrap().show_overlay {
+        return;
+    }
+
     // If the overlay window already exists, just show it
     if let Some(window) = app.get_webview_window("status-overlay") {
         let _ = window.show();
@@ -153,6 +158,13 @@ pub fn show_overlay(app: &AppHandle) {
                     if let Some(toplevel) = webview.toplevel() {
                         if let Ok(gtk_win) = toplevel.downcast::<gtk::Window>() {
                             gtk_win.set_type_hint(gdk::WindowTypeHint::Utility);
+                            // Best-effort: never take keyboard focus. Only a hint —
+                            // GNOME Wayland ignores it (the compositor focuses new
+                            // windows on map), but X11 and some Wayland compositors
+                            // honor it. The overlay must not steal focus, because
+                            // the paste chord then lands in the overlay instead of
+                            // the app the user was typing in.
+                            gtk_win.set_accept_focus(false);
                         }
                     }
                 });

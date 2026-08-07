@@ -35,6 +35,14 @@ fn emit_status(app: &AppHandle, event: &PipelineStatusEvent) {
 pub async fn run_pipeline(app: AppHandle) -> Result<(), AppError> {
     let start_time = std::time::Instant::now();
 
+    // Hide the status overlay first. On Wayland/GNOME the compositor forces
+    // focus onto a newly shown webview window (client hints like
+    // `accept_focus(false)` are unreliable), so an overlay left up through the
+    // paste step steals keyboard focus and the paste lands in the overlay
+    // instead of the target app. Hiding it here gives the compositor the
+    // transcription + LLM time to restore focus to the previously-active window.
+    tray::hide_overlay(&app);
+
     // 1. Stop recording and get WAV bytes
     tray::set_tray_status(&app, "processing");
     emit_status(

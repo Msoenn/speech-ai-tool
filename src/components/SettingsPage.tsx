@@ -110,6 +110,18 @@ export default function SettingsPage({ onBack }: SettingsPageProps) {
               />
             </div>
           )}
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings.show_overlay}
+              onChange={(e) => update({ show_overlay: e.target.checked })}
+              className="accent-accent"
+            />
+            <span className="text-sm text-text">Show recording status overlay</span>
+          </label>
+          <p className="text-xs text-text-muted">
+            Not natively supported on GNOME Wayland — the overlay window steals focus there, so it is off by default on Wayland.
+          </p>
         </div>
       </section>
 
