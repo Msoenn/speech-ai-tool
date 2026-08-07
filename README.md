@@ -100,6 +100,16 @@ sudo apt-get install cmake clang libasound2-dev libwebkit2gtk-4.1-dev \
   librsvg2-dev libjavascriptcoregtk-4.1-dev libxdo-dev
 ```
 
+### Linux (Wayland)
+
+Global hotkeys read the raw input devices. On Wayland sessions the app needs
+read access to `/dev/input`, which most users don't have by default:
+
+    sudo usermod -aG input $USER
+
+Log out and back in afterwards. X11 sessions work without this step (the app
+falls back to the X11 listener automatically).
+
 **macOS:**
 ```bash
 xcode-select --install

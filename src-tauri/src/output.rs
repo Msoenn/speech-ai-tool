@@ -1,6 +1,14 @@
 use crate::error::AppError;
-use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use tauri_plugin_clipboard_manager::ClipboardExt;
+
+/// A modifier in a paste shortcut, independent of any backend's key enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasteModifier {
+    Control,
+    Shift,
+    Alt,
+    Meta,
+}
 
 pub fn copy_to_clipboard(app: &tauri::AppHandle, text: &str) -> Result<(), AppError> {
     app.clipboard()
@@ -31,8 +39,8 @@ pub fn copy_and_paste(
     Ok(())
 }
 
-/// Parse a shortcut string like "Ctrl+Shift+V" or "Cmd+V" into modifier keys + a character.
-fn parse_paste_shortcut(shortcut: &str) -> Result<(Vec<Key>, Key), AppError> {
+/// Parse a shortcut string like "Ctrl+Shift+V" or "Cmd+V" into modifiers + a key.
+fn parse_paste_shortcut(shortcut: &str) -> Result<(Vec<PasteModifier>, char), AppError> {
     let parts: Vec<&str> = shortcut.split('+').map(|s| s.trim()).collect();
     if parts.is_empty() {
         return Err(AppError::Output("Empty paste shortcut".into()));
@@ -40,11 +48,11 @@ fn parse_paste_shortcut(shortcut: &str) -> Result<(Vec<Key>, Key), AppError> {
 
     let mut modifiers = Vec::new();
     for part in &parts[..parts.len() - 1] {
-        let key = match part.to_lowercase().as_str() {
-            "ctrl" | "control" => Key::Control,
-            "shift" => Key::Shift,
-            "alt" => Key::Alt,
-            "cmd" | "meta" | "super" => Key::Meta,
+        let modifier = match part.to_lowercase().as_str() {
+            "ctrl" | "control" => PasteModifier::Control,
+            "shift" => PasteModifier::Shift,
+            "alt" => PasteModifier::Alt,
+            "cmd" | "meta" | "super" => PasteModifier::Meta,
             other => {
                 return Err(AppError::Output(format!(
                     "Unknown modifier in paste shortcut: {}",
@@ -52,12 +60,12 @@ fn parse_paste_shortcut(shortcut: &str) -> Result<(Vec<Key>, Key), AppError> {
                 )))
             }
         };
-        modifiers.push(key);
+        modifiers.push(modifier);
     }
 
     let last = parts.last().unwrap();
     let char_key = if last.len() == 1 {
-        Key::Unicode(last.to_lowercase().chars().next().unwrap())
+        last.to_lowercase().chars().next().unwrap()
     } else {
         return Err(AppError::Output(format!(
             "Invalid key in paste shortcut: {}",
@@ -98,38 +106,97 @@ fn simulate_paste(app: &tauri::AppHandle, paste_shortcut: &str) -> Result<(), Ap
     }
 }
 
-/// Synthesize the paste chord (modifiers + key). On macOS this MUST run on the
-/// main thread — see the note in `simulate_paste`.
-fn press_paste_chord(modifiers: &[Key], char_key: Key) -> Result<(), String> {
-    let mut enigo =
-        Enigo::new(&Settings::default()).map_err(|e| format!("Failed to create enigo: {}", e))?;
+/// Synthesize the paste chord (modifiers + key). On Linux the uinput injector
+/// is primary; if it fails (e.g. the user isn't in the `input` group and can't
+/// open /dev/uinput), fall back to enigo — on X11 that reaches the window,
+/// on native Wayland it fails harmlessly and the text stays in the clipboard.
+fn press_paste_chord(modifiers: &[PasteModifier], char_key: char) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        match crate::evdev_input::send_paste_chord(modifiers, char_key) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                eprintln!("uinput paste failed ({}); falling back to enigo", e);
+                press_paste_chord_enigo(modifiers, char_key)
+            }
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        press_paste_chord_enigo(modifiers, char_key)
+    }
+}
+
+/// enigo-based injection (kept unchanged in behavior).
+fn press_paste_chord_enigo(modifiers: &[PasteModifier], char_key: char) -> Result<(), String> {
+    use enigo::{Direction, Enigo, Key as EnigoKey, Keyboard, Settings};
+
+    fn enigo_key_for(m: PasteModifier) -> EnigoKey {
+        match m {
+            PasteModifier::Control => EnigoKey::Control,
+            PasteModifier::Shift => EnigoKey::Shift,
+            PasteModifier::Alt => EnigoKey::Alt,
+            PasteModifier::Meta => EnigoKey::Meta,
+        }
+    }
+
+    let mut enigo = Enigo::new(&Settings::default())
+        .map_err(|e| format!("Failed to create enigo: {}", e))?;
 
     // Defensively release all common modifiers to ensure clean state (e.g. the
     // hotkey's own modifiers may still be physically held).
-    let all_modifiers = [Key::Control, Key::Shift, Key::Alt, Key::Meta];
+    let all_modifiers = [EnigoKey::Control, EnigoKey::Shift, EnigoKey::Alt, EnigoKey::Meta];
     for m in &all_modifiers {
         let _ = enigo.key(*m, Direction::Release);
     }
     std::thread::sleep(std::time::Duration::from_millis(50));
 
-    // Press modifiers
     for m in modifiers {
         enigo
-            .key(*m, Direction::Press)
+            .key(enigo_key_for(*m), Direction::Press)
             .map_err(|e| format!("Key press failed: {}", e))?;
     }
 
-    // Press the key
     enigo
-        .key(char_key, Direction::Click)
+        .key(EnigoKey::Unicode(char_key), Direction::Click)
         .map_err(|e| format!("Key click failed: {}", e))?;
 
-    // Release modifiers in reverse order
     for m in modifiers.iter().rev() {
         enigo
-            .key(*m, Direction::Release)
+            .key(enigo_key_for(*m), Direction::Release)
             .map_err(|e| format!("Key release failed: {}", e))?;
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_ctrl_shift_v() {
+        assert_eq!(
+            parse_paste_shortcut("Ctrl+Shift+V").unwrap(),
+            (vec![PasteModifier::Control, PasteModifier::Shift], 'v')
+        );
+    }
+
+    #[test]
+    fn parses_cmd_v() {
+        assert_eq!(
+            parse_paste_shortcut("Cmd+V").unwrap(),
+            (vec![PasteModifier::Meta], 'v')
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_modifier() {
+        assert!(parse_paste_shortcut("Hyper+V").is_err());
+    }
+
+    #[test]
+    fn rejects_empty_shortcut() {
+        assert!(parse_paste_shortcut("").is_err());
+    }
 }
