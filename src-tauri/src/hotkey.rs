@@ -43,9 +43,9 @@ impl HotkeyState {
 /// rdev's `TSMGetInputSourceProperty` call, which crashes on macOS 26.3+
 /// when invoked from a background thread. On Linux we listen via evdev first
 /// (one detached reader thread per keyboard device; `evdev_input::listen`
-/// returns as soon as they are up, so `listener_running` clears almost
-/// immediately — Linux calls this once at app setup), falling back to
-/// `rdev::listen` if evdev is unavailable. On other platforms we use
+/// blocks for as long as those threads run, mirroring `rdev::listen`, so
+/// `listener_running` stays set until the listener actually stops), falling
+/// back to `rdev::listen` if evdev is unavailable. On other platforms we use
 /// `rdev::listen`.
 pub fn ensure_listener(app: &AppHandle, state: &Arc<HotkeyState>) {
     if state.listener_running.swap(true, Ordering::SeqCst) {
@@ -71,18 +71,20 @@ pub fn ensure_listener(app: &AppHandle, state: &Arc<HotkeyState>) {
                 if crate::evdev_input::suppressing_self_injection() {
                     return;
                 }
-                let mut held = held_keys.lock().unwrap();
-                match event_type {
-                    EventType::KeyPress(key) => {
-                        held.insert(key);
-                        check_combo(&held, &state_clone, &app_for_handler);
+                let held_snapshot: HashSet<Key> = {
+                    let mut held = held_keys.lock().unwrap();
+                    match event_type {
+                        EventType::KeyPress(key) => {
+                            held.insert(key);
+                        }
+                        EventType::KeyRelease(key) => {
+                            held.remove(&key);
+                        }
+                        _ => return,
                     }
-                    EventType::KeyRelease(key) => {
-                        held.remove(&key);
-                        check_combo(&held, &state_clone, &app_for_handler);
-                    }
-                    _ => {}
-                }
+                    held.clone()
+                };
+                check_combo(&held_snapshot, &state_clone, &app_for_handler);
             },
         )));
 

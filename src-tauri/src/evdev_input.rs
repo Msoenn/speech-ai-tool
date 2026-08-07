@@ -310,6 +310,7 @@ pub(crate) fn listen(
     let callback: Arc<Mutex<Box<dyn FnMut(rdev::EventType) + Send>>> =
         Arc::new(Mutex::new(Box::new(callback)));
 
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
     let mut opened = 0usize;
     for (_, mut device) in evdev::enumerate() {
         if !is_keyboard(&device) {
@@ -317,31 +318,37 @@ pub(crate) fn listen(
         }
         opened += 1;
         let cb = Arc::clone(&callback);
-        std::thread::spawn(move || loop {
-            match device.fetch_events() {
-                Ok(events) => {
-                    for event in events {
-                        if event.event_type() != EventType::KEY {
-                            continue;
+        let done_tx = done_tx.clone();
+        std::thread::spawn(move || {
+            // Held until the reader loop exits, so `done_rx.recv()` returns when
+            // every device thread stops.
+            let _done = done_tx;
+            loop {
+                match device.fetch_events() {
+                    Ok(events) => {
+                        for event in events {
+                            if event.event_type() != EventType::KEY {
+                                continue;
+                            }
+                            if SELF_INJECTING.load(Ordering::Relaxed) {
+                                continue;
+                            }
+                            let Some(key) = evdev_to_rdev_key(event.code()) else {
+                                continue;
+                            };
+                            let event_type = match event.value() {
+                                1 => rdev::EventType::KeyPress(key),
+                                0 => rdev::EventType::KeyRelease(key),
+                                _ => continue, // autorepeat
+                            };
+                            let Ok(mut cb) = cb.lock() else { continue };
+                            (cb)(event_type);
                         }
-                        if SELF_INJECTING.load(Ordering::Relaxed) {
-                            continue;
-                        }
-                        let Some(key) = evdev_to_rdev_key(event.code()) else {
-                            continue;
-                        };
-                        let event_type = match event.value() {
-                            1 => rdev::EventType::KeyPress(key),
-                            0 => rdev::EventType::KeyRelease(key),
-                            _ => continue, // autorepeat
-                        };
-                        let Ok(mut cb) = cb.lock() else { continue };
-                        (cb)(event_type);
                     }
-                }
-                Err(e) => {
-                    eprintln!("evdev device read error: {} (device removed?)", e);
-                    break;
+                    Err(e) => {
+                        eprintln!("evdev device read error: {} (device removed?)", e);
+                        break;
+                    }
                 }
             }
         });
@@ -353,6 +360,11 @@ pub(crate) fn listen(
                 .into(),
         );
     }
+    // Block for as long as any device thread runs (mirroring `rdev::listen`),
+    // so the caller's `listener_running` flag stays set until the listener
+    // actually stops. Returns Ok once every device thread has exited.
+    drop(done_tx);
+    let _ = done_rx.recv();
     Ok(())
 }
 
