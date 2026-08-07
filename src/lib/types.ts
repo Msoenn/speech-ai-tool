@@ -53,6 +53,7 @@ export interface AppSettings {
   llm: LlmConfig;
   auto_paste: boolean;
   paste_shortcut: string;
+  show_overlay: boolean;
   history_max_items: number;
   palette: string;
 }

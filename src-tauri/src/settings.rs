@@ -22,6 +22,23 @@ pub struct AppSettings {
     /// Color theme id (see src/lib/palettes.ts). Frontend-only preference.
     #[serde(default = "default_palette")]
     pub palette: String,
+    /// Whether to show the recording status overlay window.
+    #[serde(default = "default_show_overlay")]
+    pub show_overlay: bool,
+}
+
+/// True on Linux under a Wayland session. GNOME Wayland forces focus onto
+/// newly mapped windows, so the overlay would steal focus; default it off there.
+/// Detected via XDG_SESSION_TYPE or, more robustly, a set WAYLAND_DISPLAY
+/// (present even for nested/container Wayland where the session var may be absent).
+pub fn is_wayland_session() -> bool {
+    cfg!(target_os = "linux")
+        && (std::env::var("XDG_SESSION_TYPE").as_deref() == Ok("wayland")
+            || std::env::var("WAYLAND_DISPLAY").map(|v| !v.is_empty()).unwrap_or(false))
+}
+
+pub fn default_show_overlay() -> bool {
+    !is_wayland_session()
 }
 
 pub fn default_palette() -> String {
@@ -73,6 +90,7 @@ impl Default for AppSettings {
             paste_shortcut: default_paste_shortcut(),
             history_max_items: 100,
             palette: default_palette(),
+            show_overlay: default_show_overlay(),
         }
     }
 }
