@@ -292,66 +292,94 @@ pub(crate) fn send_paste_chord(modifiers: &[PasteModifier], key: char) -> Result
 }
 
 /// True if the device looks like a keyboard (reports a letter key).
+///
+/// Also excludes our own uinput paste-injection device (see
+/// `get_virtual_device()`): without this, a rescan run after the first paste
+/// would open it as "just another keyboard" and read back the very key events
+/// we inject for pasting, feeding them into the hotkey combo tracker.
 fn is_keyboard(device: &evdev::Device) -> bool {
+    if device.name() == Some("speech-ai-tool-paste") {
+        return false;
+    }
     device
         .supported_keys()
         .map_or(false, |keys| keys.contains(KeyCode::KEY_A))
 }
 
-/// Listen for global key events on all keyboard devices. Each device gets its
-/// own reader thread; `fetch_events` blocks, so no polling is needed. Events
-/// are mapped to `rdev::EventType` and forwarded to `callback`.
+/// Spawn a reader thread for one already-opened keyboard device. Runs until
+/// `fetch_events` errors (device unplugged), then removes itself from `open`
+/// so a later rescan in `listen()` can reopen the path if it comes back.
+fn spawn_reader(
+    path: std::path::PathBuf,
+    mut device: evdev::Device,
+    cb: Arc<Mutex<Box<dyn FnMut(rdev::EventType) + Send>>>,
+    open: Arc<Mutex<std::collections::HashSet<std::path::PathBuf>>>,
+) {
+    std::thread::spawn(move || loop {
+        match device.fetch_events() {
+            Ok(events) => {
+                for event in events {
+                    if event.event_type() != EventType::KEY {
+                        continue;
+                    }
+                    if SELF_INJECTING.load(Ordering::Relaxed) {
+                        continue;
+                    }
+                    let Some(key) = evdev_to_rdev_key(event.code()) else {
+                        continue;
+                    };
+                    let event_type = match event.value() {
+                        1 => rdev::EventType::KeyPress(key),
+                        0 => rdev::EventType::KeyRelease(key),
+                        _ => continue, // autorepeat
+                    };
+                    let Ok(mut cb) = cb.lock() else { continue };
+                    (cb)(event_type);
+                }
+            }
+            Err(e) => {
+                eprintln!("evdev device read error: {} (device removed?)", e);
+                if let Ok(mut open) = open.lock() {
+                    open.remove(&path);
+                }
+                break;
+            }
+        }
+    });
+}
+
+/// Listen for global key events on all keyboard devices, self-healing across
+/// USB unplug/replug. Each open device gets its own reader thread (`fetch_events`
+/// blocks, so no polling within a device is needed); events are mapped to
+/// `rdev::EventType` and forwarded to `callback`.
 ///
-/// Returns `Err` only if no readable keyboard device could be opened (e.g. the
-/// user is not in the `input` group).
+/// After the initial scan opens at least one device, this function never
+/// returns: it rescans `/dev/input` every 2 seconds and opens any keyboard
+/// device not already owned by a reader thread, so a keyboard that reappears
+/// under a new `/dev/input/eventX` node after being unplugged is picked back
+/// up without an app relaunch.
+///
+/// Returns `Err` only if the initial scan finds no readable keyboard device
+/// (e.g. the user is not in the `input` group); callers use this to fall back
+/// to `rdev::listen`.
 pub(crate) fn listen(
     callback: impl FnMut(rdev::EventType) + Send + 'static,
 ) -> Result<(), String> {
     let callback: Arc<Mutex<Box<dyn FnMut(rdev::EventType) + Send>>> =
         Arc::new(Mutex::new(Box::new(callback)));
+    let open: Arc<Mutex<std::collections::HashSet<std::path::PathBuf>>> =
+        Arc::new(Mutex::new(std::collections::HashSet::new()));
 
-    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+    // Counted locally rather than via `open`, which a reader that errors out
+    // immediately would already have removed itself from.
     let mut opened = 0usize;
-    for (_, mut device) in evdev::enumerate() {
+    for (path, device) in evdev::enumerate() {
         if !is_keyboard(&device) {
             continue;
         }
+        open.lock().unwrap().insert(path.clone());
+        spawn_reader(path, device, Arc::clone(&callback), Arc::clone(&open));
         opened += 1;
-        let cb = Arc::clone(&callback);
-        let done_tx = done_tx.clone();
-        std::thread::spawn(move || {
-            // Held until the reader loop exits, so `done_rx.recv()` returns when
-            // every device thread stops.
-            let _done = done_tx;
-            loop {
-                match device.fetch_events() {
-                    Ok(events) => {
-                        for event in events {
-                            if event.event_type() != EventType::KEY {
-                                continue;
-                            }
-                            if SELF_INJECTING.load(Ordering::Relaxed) {
-                                continue;
-                            }
-                            let Some(key) = evdev_to_rdev_key(event.code()) else {
-                                continue;
-                            };
-                            let event_type = match event.value() {
-                                1 => rdev::EventType::KeyPress(key),
-                                0 => rdev::EventType::KeyRelease(key),
-                                _ => continue, // autorepeat
-                            };
-                            let Ok(mut cb) = cb.lock() else { continue };
-                            (cb)(event_type);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("evdev device read error: {} (device removed?)", e);
-                        break;
-                    }
-                }
-            }
-        });
     }
 
     if opened == 0 {
@@ -360,12 +388,26 @@ pub(crate) fn listen(
                 .into(),
         );
     }
-    // Block for as long as any device thread runs (mirroring `rdev::listen`),
-    // so the caller's `listener_running` flag stays set until the listener
-    // actually stops. Returns Ok once every device thread has exited.
-    drop(done_tx);
-    let _ = done_rx.recv();
-    Ok(())
+
+    // Rescan indefinitely so a keyboard replugged under a new event node (or
+    // any newly attached keyboard) gets picked up; a device that errored out
+    // and was removed from `open` is simply reopened on a later pass.
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        for (path, device) in evdev::enumerate() {
+            if !is_keyboard(&device) {
+                continue;
+            }
+            let mut open_guard = open.lock().unwrap();
+            if open_guard.contains(&path) {
+                continue;
+            }
+            open_guard.insert(path.clone());
+            drop(open_guard);
+            eprintln!("evdev: opened new keyboard device {:?}", path);
+            spawn_reader(path, device, Arc::clone(&callback), Arc::clone(&open));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -445,5 +487,73 @@ mod tests {
         for m in [PasteModifier::Control, PasteModifier::Shift, PasteModifier::Alt, PasteModifier::Meta] {
             assert!(caps.contains(paste_modifier_keycode(m)), "no capability for modifier");
         }
+    }
+
+    #[test]
+    #[ignore] // needs /dev/uinput + /dev/input read access (input group); run manually
+    fn hotplugged_keyboard_is_picked_up() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let (tx, rx) = mpsc::channel::<rdev::EventType>();
+        std::thread::spawn(move || {
+            // `listen` blocks forever by design; the thread is intentionally
+            // left detached and reaped when the test process exits.
+            let _ = listen(move |et| {
+                let _ = tx.send(et);
+            });
+        });
+
+        // Let the initial scan finish before the virtual device exists, so its
+        // node is only ever seen by the hotplug rescan, not the startup scan.
+        std::thread::sleep(Duration::from_millis(500));
+
+        let mut keys: AttributeSet<KeyCode> = AttributeSet::new();
+        keys.insert(KeyCode::KEY_A);
+        keys.insert(KeyCode::KEY_RIGHTSHIFT);
+        let mut device = VirtualDevice::builder()
+            .expect("failed to open /dev/uinput (need access, e.g. 'input' group / uaccess)")
+            .name("speech-ai-test-kb")
+            .with_keys(&keys)
+            .expect("failed to configure test uinput device")
+            .build()
+            .expect("failed to create test uinput device");
+
+        // Give udev time to create the /dev/input/eventX node for the new device.
+        std::thread::sleep(Duration::from_millis(300));
+
+        let mut received_press = false;
+        for _ in 0..15 {
+            // Bare shift only: never emit letter/number keys here, since a leak
+            // to the user's real desktop session would type into whatever has
+            // focus.
+            let press = InputEvent::new(EventType::KEY.0, KeyCode::KEY_RIGHTSHIFT.0, 1);
+            let release = InputEvent::new(EventType::KEY.0, KeyCode::KEY_RIGHTSHIFT.0, 0);
+            device.emit(&[press]).expect("emit press");
+            std::thread::sleep(Duration::from_millis(15));
+            device.emit(&[release]).expect("emit release");
+
+            let deadline = std::time::Instant::now() + Duration::from_millis(500);
+            while std::time::Instant::now() < deadline {
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                match rx.recv_timeout(remaining) {
+                    Ok(rdev::EventType::KeyPress(rdev::Key::ShiftRight)) => {
+                        received_press = true;
+                        break;
+                    }
+                    Ok(_) => continue, // release or unrelated event; keep waiting
+                    Err(_) => break,   // this attempt's window elapsed
+                }
+            }
+            if received_press {
+                break;
+            }
+        }
+
+        assert!(
+            received_press,
+            "hotplugged keyboard device was never picked up by listen()'s rescan \
+             (expected ShiftRight KeyPress within retry window)"
+        );
     }
 }

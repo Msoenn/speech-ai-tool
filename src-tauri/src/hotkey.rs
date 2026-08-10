@@ -42,11 +42,12 @@ impl HotkeyState {
 /// On macOS we use a direct CGEvent tap (see `macos_event_tap`) to avoid
 /// rdev's `TSMGetInputSourceProperty` call, which crashes on macOS 26.3+
 /// when invoked from a background thread. On Linux we listen via evdev first
-/// (one detached reader thread per keyboard device; `evdev_input::listen`
-/// blocks for as long as those threads run, mirroring `rdev::listen`, so
-/// `listener_running` stays set until the listener actually stops), falling
-/// back to `rdev::listen` if evdev is unavailable. On other platforms we use
-/// `rdev::listen`.
+/// (one detached reader thread per keyboard device, self-healing across USB
+/// unplug/replug: `evdev_input::listen` blocks forever once at least one
+/// device is open, rescanning `/dev/input` every 2s for hotplugged keyboards,
+/// so `listener_running` stays set for the life of the app on that path),
+/// falling back to `rdev::listen` if the initial evdev scan finds no readable
+/// device. On other platforms we use `rdev::listen`.
 pub fn ensure_listener(app: &AppHandle, state: &Arc<HotkeyState>) {
     if state.listener_running.swap(true, Ordering::SeqCst) {
         return; // already running
