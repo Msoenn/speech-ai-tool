@@ -14,7 +14,17 @@ pub struct AppSettings {
     pub whisper_api_key: String,
     #[serde(default = "default_whisper_api_model")]
     pub whisper_api_model: String,
+    /// Style example for the Whisper prompt (see whisper::build_initial_prompt).
+    #[serde(default = "crate::whisper::default_style_example")]
+    pub whisper_style_example: String,
+    /// Glossary for the Whisper prompt: comma-separated words to spell right.
+    #[serde(default = "crate::whisper::default_glossary")]
+    pub whisper_glossary: String,
     pub llm: LlmConfig,
+    /// Whether the LLM cleans up the transcription. If false, the raw Whisper
+    /// text is pasted.
+    #[serde(default = "default_llm_cleanup_enabled")]
+    pub llm_cleanup_enabled: bool,
     pub auto_paste: bool,
     #[serde(default = "default_paste_shortcut")]
     pub paste_shortcut: String,
@@ -39,6 +49,10 @@ pub fn is_wayland_session() -> bool {
 
 pub fn default_show_overlay() -> bool {
     !is_wayland_session()
+}
+
+pub fn default_llm_cleanup_enabled() -> bool {
+    true
 }
 
 pub fn default_palette() -> String {
@@ -70,6 +84,13 @@ pub fn default_paste_shortcut() -> String {
     }
 }
 
+impl AppSettings {
+    /// The prompt sent to Whisper, or `None` if both prompt boxes are empty.
+    pub fn whisper_initial_prompt(&self) -> Option<String> {
+        crate::whisper::build_initial_prompt(&self.whisper_style_example, &self.whisper_glossary)
+    }
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -85,7 +106,10 @@ impl Default for AppSettings {
             whisper_api_endpoint: String::new(),
             whisper_api_key: String::new(),
             whisper_api_model: default_whisper_api_model(),
+            whisper_style_example: crate::whisper::default_style_example(),
+            whisper_glossary: crate::whisper::default_glossary(),
             llm: LlmConfig::default(),
+            llm_cleanup_enabled: default_llm_cleanup_enabled(),
             auto_paste: true,
             paste_shortcut: default_paste_shortcut(),
             history_max_items: 100,
@@ -138,4 +162,33 @@ pub fn save_settings(
         .save()
         .map_err(|e| crate::error::AppError::Settings(e.to_string()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_saved_before_these_fields_get_the_defaults() {
+        let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+        let obj = value.as_object_mut().unwrap();
+        obj.remove("llm_cleanup_enabled");
+        obj.remove("whisper_style_example");
+        obj.remove("whisper_glossary");
+
+        let settings: AppSettings = serde_json::from_value(value).unwrap();
+        assert!(settings.llm_cleanup_enabled);
+        assert_eq!(settings.whisper_glossary, crate::whisper::DEFAULT_GLOSSARY);
+        assert_eq!(settings.whisper_style_example, crate::whisper::DEFAULT_STYLE_EXAMPLE);
+    }
+
+    #[test]
+    fn empty_prompt_boxes_send_no_prompt() {
+        let settings = AppSettings {
+            whisper_style_example: String::new(),
+            whisper_glossary: String::new(),
+            ..AppSettings::default()
+        };
+        assert_eq!(settings.whisper_initial_prompt(), None);
+    }
 }

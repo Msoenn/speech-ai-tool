@@ -122,6 +122,73 @@ pub async fn download_model(app: AppHandle, model_name: &str) -> Result<(), AppE
     Ok(())
 }
 
+/// Default style example for the Whisper prompt. Whisper does not obey
+/// instructions. It treats the prompt as the text spoken before the audio and
+/// copies its style, so this is a short sample of clean, punctuated speech
+/// with no filler words.
+pub const DEFAULT_STYLE_EXAMPLE: &str = "This is a clear, well-punctuated transcript. I think we need to fix the login bug first, and then we can ship the release on Friday.";
+
+/// Default glossary for the Whisper prompt: common tech words that Whisper
+/// often spells wrong. Users edit this list in the settings.
+pub const DEFAULT_GLOSSARY: &str = "Kubernetes, kubectl, PostgreSQL, SQLite, Redis, nginx, GitHub, npm, pnpm, Node.js, Next.js, TypeScript, Tauri, Vite, Terraform, JSON, YAML, OAuth, JWT, CI/CD, SSH, regex, localhost, async, stdout, sudo, macOS, VS Code, LLM, Ollama, OpenAI, Claude, CUDA, PyTorch, GraphQL, gRPC, WebSocket, Grafana, Kafka, repo";
+
+pub fn default_style_example() -> String {
+    DEFAULT_STYLE_EXAMPLE.to_string()
+}
+
+pub fn default_glossary() -> String {
+    DEFAULT_GLOSSARY.to_string()
+}
+
+/// Build the Whisper prompt from the two settings boxes. Returns `None` if
+/// both are empty, so no prompt is sent.
+///
+/// The glossary goes last on purpose. Whisper keeps only the last 224 tokens
+/// of a prompt, so if the text is too long it drops the style example first
+/// and the glossary survives.
+pub fn build_initial_prompt(style_example: &str, glossary: &str) -> Option<String> {
+    let style = style_example.split_whitespace().collect::<Vec<_>>().join(" ");
+    let terms: Vec<&str> = glossary
+        .split(|c| c == ',' || c == '\n')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    let mut parts: Vec<String> = Vec::new();
+    if !style.is_empty() {
+        parts.push(style);
+    }
+    if !terms.is_empty() {
+        parts.push(format!("Glossary: {}.", terms.join(", ")));
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" "))
+    }
+}
+
+fn normalize_for_echo(text: &str) -> String {
+    let cleaned: String = text
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { ' ' })
+        .collect();
+    cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// True if the transcription is a copy of part of the prompt. On silence or a
+/// very short clip, Whisper sometimes outputs the prompt text itself. Short
+/// outputs are never flagged, so a real one-word dictation of a glossary term
+/// still goes through.
+pub fn is_prompt_echo(text: &str, prompt: &str) -> bool {
+    let text = normalize_for_echo(text);
+    if text.len() < 20 {
+        return false;
+    }
+    normalize_for_echo(prompt).contains(&text)
+}
+
 pub struct WhisperEngine {
     ctx: Mutex<Option<whisper_rs::WhisperContext>>,
 }
@@ -163,7 +230,12 @@ impl WhisperEngine {
         Ok(())
     }
 
-    pub fn transcribe(&self, wav_bytes: &[u8], language: &str) -> Result<String, AppError> {
+    pub fn transcribe(
+        &self,
+        wav_bytes: &[u8],
+        language: &str,
+        initial_prompt: Option<&str>,
+    ) -> Result<String, AppError> {
         let guard = self.ctx.lock().unwrap();
         let ctx = guard
             .as_ref()
@@ -181,6 +253,9 @@ impl WhisperEngine {
             params.set_language(None);
         } else {
             params.set_language(Some(language));
+        }
+        if let Some(prompt) = initial_prompt {
+            params.set_initial_prompt(prompt);
         }
         params.set_print_special(false);
         params.set_print_progress(false);
@@ -211,6 +286,7 @@ pub async fn transcribe_via_api(
     model: &str,
     wav_bytes: &[u8],
     language: &str,
+    initial_prompt: Option<&str>,
 ) -> Result<String, AppError> {
     let url = format!(
         "{}/v1/audio/transcriptions",
@@ -236,6 +312,10 @@ pub async fn transcribe_via_api(
 
     if language != "auto" {
         form = form.text("language", language.to_string());
+    }
+
+    if let Some(prompt) = initial_prompt {
+        form = form.text("prompt", prompt.to_string());
     }
 
     let client = reqwest::Client::new();
@@ -285,4 +365,63 @@ fn decode_wav_to_samples(wav_bytes: &[u8]) -> Result<Vec<f32>, AppError> {
     };
 
     Ok(samples)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prompt_puts_style_first_and_glossary_last() {
+        let prompt = build_initial_prompt("Hello there.", "kubectl, pnpm").unwrap();
+        assert_eq!(prompt, "Hello there. Glossary: kubectl, pnpm.");
+    }
+
+    #[test]
+    fn prompt_is_none_when_both_boxes_are_empty() {
+        assert_eq!(build_initial_prompt("  ", " , \n "), None);
+    }
+
+    #[test]
+    fn prompt_works_with_only_one_box() {
+        assert_eq!(
+            build_initial_prompt("", "kubectl").unwrap(),
+            "Glossary: kubectl."
+        );
+        assert_eq!(build_initial_prompt("Hello there.", "").unwrap(), "Hello there.");
+    }
+
+    #[test]
+    fn glossary_accepts_newlines_and_stray_commas() {
+        let prompt = build_initial_prompt("", "kubectl,\n pnpm ,, Node.js\n").unwrap();
+        assert_eq!(prompt, "Glossary: kubectl, pnpm, Node.js.");
+    }
+
+    #[test]
+    fn default_prompt_is_built_from_both_defaults() {
+        let prompt = build_initial_prompt(DEFAULT_STYLE_EXAMPLE, DEFAULT_GLOSSARY).unwrap();
+        assert!(prompt.starts_with(DEFAULT_STYLE_EXAMPLE));
+        assert!(prompt.ends_with("repo."));
+    }
+
+    #[test]
+    fn echo_of_the_prompt_is_detected() {
+        let prompt = build_initial_prompt(DEFAULT_STYLE_EXAMPLE, DEFAULT_GLOSSARY).unwrap();
+        assert!(is_prompt_echo(
+            "This is a clear, well-punctuated transcript.",
+            &prompt
+        ));
+        assert!(is_prompt_echo("Glossary: Kubernetes, kubectl, PostgreSQL", &prompt));
+    }
+
+    #[test]
+    fn real_speech_and_short_terms_are_not_an_echo() {
+        let prompt = build_initial_prompt(DEFAULT_STYLE_EXAMPLE, DEFAULT_GLOSSARY).unwrap();
+        assert!(!is_prompt_echo("kubectl", &prompt));
+        assert!(!is_prompt_echo("Kubernetes", &prompt));
+        assert!(!is_prompt_echo(
+            "We need to restart the Kubernetes cluster tonight.",
+            &prompt
+        ));
+    }
 }

@@ -15,6 +15,7 @@ export default function LlmSettings({ settings, onChange }: LlmSettingsProps) {
   const [editOutput, setEditOutput] = useState("");
 
   const examples = settings.llm.few_shot_examples ?? [];
+  const cleanupEnabled = settings.llm_cleanup_enabled ?? true;
 
   const updateLlm = (partial: Partial<LlmConfig>) => {
     onChange({ ...settings, llm: { ...settings.llm, ...partial } });
@@ -69,8 +70,27 @@ export default function LlmSettings({ settings, onChange }: LlmSettingsProps) {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-medium text-text">LLM Configuration</h3>
+      <h3 className="text-sm font-medium text-text">LLM Cleanup</h3>
 
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={cleanupEnabled}
+          onChange={(e) => onChange({ ...settings, llm_cleanup_enabled: e.target.checked })}
+          className="accent-accent"
+        />
+        <span className="text-sm text-text">Clean up the transcription with an LLM</span>
+      </label>
+
+      {!cleanupEnabled && (
+        <p className="text-xs text-text-muted">
+          Off: the app pastes the Whisper text as it is. The Whisper prompt above still
+          applies.
+        </p>
+      )}
+
+      {cleanupEnabled && (
+      <>
       <div className="flex gap-4">
         <label className="flex items-center gap-2 cursor-pointer">
           <input
@@ -237,6 +257,8 @@ export default function LlmSettings({ settings, onChange }: LlmSettingsProps) {
           )}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

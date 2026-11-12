@@ -17,6 +17,11 @@ export async function transcribeAudio(wavBytes: number[]): Promise<string> {
   return invoke("transcribe_audio", { wavBytes });
 }
 
+/** The built-in Whisper prompt boxes, as [style example, glossary]. */
+export async function getDefaultWhisperPrompt(): Promise<[string, string]> {
+  return invoke("get_default_whisper_prompt");
+}
+
 export async function loadWhisperModel(modelName: string): Promise<void> {
   return invoke("load_whisper_model", { modelName });
 }
