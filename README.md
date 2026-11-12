@@ -164,6 +164,7 @@ All settings are available through the app's dashboard (click the tray icon):
 - **Hotkey** — change the global shortcut
 - **Whisper** — choose model size or switch to an API endpoint
 - **Whisper prompt** — a glossary of words that Whisper must spell right (for example `kubectl`, `PostgreSQL`), and a short style example. Whisper copies the spelling and style of this text. It does not follow instructions. The limit is about 224 tokens.
+- **Remove silence before transcription** (API mode) — sends `vad_filter=true` to Speaches and other faster-whisper servers, which stops made-up text over silence
 - **LLM** — configure Ollama endpoint, model, and cleanup behavior. Turn off "Clean up the transcription with an LLM" to paste the Whisper text as it is.
 - **Auto-paste** — toggle automatic pasting and customize the paste shortcut
 - **Few-shot examples** — edit the example pairs that guide the LLM cleanup

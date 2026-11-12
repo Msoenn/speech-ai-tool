@@ -14,6 +14,10 @@ pub struct AppSettings {
     pub whisper_api_key: String,
     #[serde(default = "default_whisper_api_model")]
     pub whisper_api_model: String,
+    /// API mode only: ask the server to cut silence out of the audio first
+    /// (the `vad_filter` field of Speaches / faster-whisper servers).
+    #[serde(default)]
+    pub whisper_api_vad_filter: bool,
     /// Style example for the Whisper prompt (see whisper::build_initial_prompt).
     #[serde(default = "crate::whisper::default_style_example")]
     pub whisper_style_example: String,
@@ -106,6 +110,7 @@ impl Default for AppSettings {
             whisper_api_endpoint: String::new(),
             whisper_api_key: String::new(),
             whisper_api_model: default_whisper_api_model(),
+            whisper_api_vad_filter: false,
             whisper_style_example: crate::whisper::default_style_example(),
             whisper_glossary: crate::whisper::default_glossary(),
             llm: LlmConfig::default(),

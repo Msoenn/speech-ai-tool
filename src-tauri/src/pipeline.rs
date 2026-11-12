@@ -79,9 +79,24 @@ pub async fn run_pipeline(app: AppHandle) -> Result<(), AppError> {
                 &wav_bytes,
                 &settings.whisper_language,
                 initial_prompt.as_deref(),
+                settings.whisper_api_vad_filter,
             )
             .await?
         }
+    };
+
+    // Whisper sometimes gets stuck and repeats one phrase many times, most
+    // often over silence at the end. Keep one copy of the phrase.
+    let raw_text = {
+        let collapsed = crate::repetition::collapse_repetition_loops(&raw_text);
+        if collapsed.len() < raw_text.len() {
+            eprintln!(
+                "Removed a Whisper repetition loop ({} -> {} chars)",
+                raw_text.len(),
+                collapsed.len()
+            );
+        }
+        collapsed
     };
 
     // On silence, Whisper sometimes outputs the prompt text itself. Treat that

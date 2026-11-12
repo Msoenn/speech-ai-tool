@@ -287,6 +287,7 @@ pub async fn transcribe_via_api(
     wav_bytes: &[u8],
     language: &str,
     initial_prompt: Option<&str>,
+    vad_filter: bool,
 ) -> Result<String, AppError> {
     let url = format!(
         "{}/v1/audio/transcriptions",
@@ -316,6 +317,14 @@ pub async fn transcribe_via_api(
 
     if let Some(prompt) = initial_prompt {
         form = form.text("prompt", prompt.to_string());
+    }
+
+    // Speaches and other faster-whisper servers accept this field. It cuts
+    // silence out of the audio before Whisper sees it, which stops made-up
+    // text and repetition loops over silence. Sent only if the user turns it
+    // on, because other servers do not know the field.
+    if vad_filter {
+        form = form.text("vad_filter", "true");
     }
 
     let client = reqwest::Client::new();

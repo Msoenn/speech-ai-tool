@@ -50,6 +50,7 @@ export interface AppSettings {
   whisper_api_endpoint: string;
   whisper_api_key: string;
   whisper_api_model: string;
+  whisper_api_vad_filter: boolean;
   whisper_style_example: string;
   whisper_glossary: string;
   llm: LlmConfig;
