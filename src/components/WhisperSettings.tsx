@@ -127,6 +127,24 @@ export default function WhisperSettings({ settings, onChange }: WhisperSettingsP
               installed (e.g. <code>Systran/faster-whisper-large-v3</code>).
             </p>
           </div>
+          <div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.whisper_api_hotwords ?? false}
+                onChange={(e) =>
+                  onChange({ ...settings, whisper_api_hotwords: e.target.checked })
+                }
+                className="accent-accent"
+              />
+              <span className="text-sm text-text">Send the glossary as hotwords</span>
+            </label>
+            <p className="text-xs text-text-muted mt-1">
+              For Speaches and other faster-whisper servers. They apply the prompt to the
+              first 30 seconds only, and hotwords to the whole recording. Leave it off for
+              the OpenAI API.
+            </p>
+          </div>
         </div>
       )}
 
