@@ -40,7 +40,7 @@ The app uses a local LLM to clean up raw transcriptions. You'll need [Ollama](ht
 
 See the [Ollama documentation](https://github.com/ollama/ollama/blob/main/README.md) for more details on setup, available models, and running on a remote server.
 
-> **Note:** If Ollama isn't available, the app gracefully falls back to the raw transcription — it still works, just without the cleanup step.
+> **Note:** If Ollama isn't available, the app gracefully falls back to the raw transcription — it still works, just without the cleanup step. You can also turn the LLM cleanup off in Settings, and then Ollama is not needed.
 
 ### Whisper Model
 
@@ -163,7 +163,8 @@ All settings are available through the app's dashboard (click the tray icon):
 - **Audio device** — select your microphone
 - **Hotkey** — change the global shortcut
 - **Whisper** — choose model size or switch to an API endpoint
-- **LLM** — configure Ollama endpoint, model, and cleanup behavior
+- **Whisper prompt** — a glossary of words that Whisper must spell right (for example `kubectl`, `PostgreSQL`), and a short style example. Whisper copies the spelling and style of this text. It does not follow instructions. The limit is about 224 tokens.
+- **LLM** — configure Ollama endpoint, model, and cleanup behavior. Turn off "Clean up the transcription with an LLM" to paste the Whisper text as it is.
 - **Auto-paste** — toggle automatic pasting and customize the paste shortcut
 - **Few-shot examples** — edit the example pairs that guide the LLM cleanup
 

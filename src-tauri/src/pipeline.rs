@@ -63,8 +63,14 @@ pub async fn run_pipeline(app: AppHandle) -> Result<(), AppError> {
     // 2. Transcribe
     let settings = state.settings.lock().unwrap().clone();
 
+    let initial_prompt = settings.whisper_initial_prompt();
+
     let raw_text = match settings.whisper_mode {
-        WhisperMode::Local => state.whisper.transcribe(&wav_bytes, &settings.whisper_language)?,
+        WhisperMode::Local => state.whisper.transcribe(
+            &wav_bytes,
+            &settings.whisper_language,
+            initial_prompt.as_deref(),
+        )?,
         WhisperMode::Api => {
             crate::whisper::transcribe_via_api(
                 &settings.whisper_api_endpoint,
@@ -72,12 +78,19 @@ pub async fn run_pipeline(app: AppHandle) -> Result<(), AppError> {
                 &settings.whisper_api_model,
                 &wav_bytes,
                 &settings.whisper_language,
+                initial_prompt.as_deref(),
             )
             .await?
         }
     };
 
-    if raw_text.trim().is_empty() {
+    // On silence, Whisper sometimes outputs the prompt text itself. Treat that
+    // the same as no speech.
+    let is_echo = initial_prompt
+        .as_deref()
+        .is_some_and(|prompt| crate::whisper::is_prompt_echo(&raw_text, prompt));
+
+    if raw_text.trim().is_empty() || is_echo {
         tray::set_tray_status(&app, "idle");
         tray::hide_overlay(&app);
         emit_status(
@@ -92,23 +105,28 @@ pub async fn run_pipeline(app: AppHandle) -> Result<(), AppError> {
         return Ok(());
     }
 
-    emit_status(
-        &app,
-        &PipelineStatusEvent {
-            status: PipelineStatus::Cleaning,
-            raw_text: Some(raw_text.clone()),
-            cleaned_text: None,
-            error: None,
-        },
-    );
+    // 3. LLM cleanup. If the user turned it off, use the raw Whisper text.
+    // If the LLM is unavailable, also fall back to the raw text.
+    let cleaned_text = if settings.llm_cleanup_enabled {
+        emit_status(
+            &app,
+            &PipelineStatusEvent {
+                status: PipelineStatus::Cleaning,
+                raw_text: Some(raw_text.clone()),
+                cleaned_text: None,
+                error: None,
+            },
+        );
 
-    // 3. LLM cleanup (graceful degradation: skip if unavailable)
-    let cleaned_text = match crate::llm::cleanup_text(&settings.llm, &raw_text).await {
-        Ok(cleaned) => cleaned,
-        Err(e) => {
-            eprintln!("LLM cleanup failed, using raw text: {}", e);
-            raw_text.clone()
+        match crate::llm::cleanup_text(&settings.llm, &raw_text).await {
+            Ok(cleaned) => cleaned,
+            Err(e) => {
+                eprintln!("LLM cleanup failed, using raw text: {}", e);
+                raw_text.clone()
+            }
         }
+    } else {
+        raw_text.clone()
     };
 
     // 4. Output

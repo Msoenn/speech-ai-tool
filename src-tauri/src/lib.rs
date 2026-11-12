@@ -102,11 +102,23 @@ async fn load_whisper_model(app: tauri::AppHandle, model_name: String) -> Result
 async fn transcribe_audio(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<String, AppError> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        let language = state.settings.lock().unwrap().whisper_language.clone();
-        state.whisper.transcribe(&wav_bytes, &language)
+        let settings = state.settings.lock().unwrap().clone();
+        let initial_prompt = settings.whisper_initial_prompt();
+        state.whisper.transcribe(
+            &wav_bytes,
+            &settings.whisper_language,
+            initial_prompt.as_deref(),
+        )
     })
     .await
     .map_err(|e| AppError::Whisper(format!("task join error: {e}")))?
+}
+
+/// The built-in Whisper prompt boxes, as (style example, glossary). The
+/// settings page uses this for its "Reset to default" buttons.
+#[tauri::command]
+fn get_default_whisper_prompt() -> (String, String) {
+    (whisper::default_style_example(), whisper::default_glossary())
 }
 
 #[tauri::command]
@@ -453,6 +465,7 @@ pub fn run() {
             download_whisper_model,
             load_whisper_model,
             transcribe_audio,
+            get_default_whisper_prompt,
             is_whisper_model_loaded,
             cleanup_text,
             test_llm_connection,
