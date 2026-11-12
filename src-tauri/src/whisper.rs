@@ -140,6 +140,21 @@ pub fn default_glossary() -> String {
     DEFAULT_GLOSSARY.to_string()
 }
 
+/// The glossary box as one clean line: terms separated by ", ". The box
+/// accepts commas and newlines. Returns `None` if there are no terms.
+pub fn glossary_terms(glossary: &str) -> Option<String> {
+    let terms: Vec<&str> = glossary
+        .split(|c| c == ',' || c == '\n')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .collect();
+    if terms.is_empty() {
+        None
+    } else {
+        Some(terms.join(", "))
+    }
+}
+
 /// Build the Whisper prompt from the two settings boxes. Returns `None` if
 /// both are empty, so no prompt is sent.
 ///
@@ -148,18 +163,13 @@ pub fn default_glossary() -> String {
 /// and the glossary survives.
 pub fn build_initial_prompt(style_example: &str, glossary: &str) -> Option<String> {
     let style = style_example.split_whitespace().collect::<Vec<_>>().join(" ");
-    let terms: Vec<&str> = glossary
-        .split(|c| c == ',' || c == '\n')
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-        .collect();
 
     let mut parts: Vec<String> = Vec::new();
     if !style.is_empty() {
         parts.push(style);
     }
-    if !terms.is_empty() {
-        parts.push(format!("Glossary: {}.", terms.join(", ")));
+    if let Some(terms) = glossary_terms(glossary) {
+        parts.push(format!("Glossary: {}.", terms));
     }
 
     if parts.is_empty() {
@@ -287,6 +297,7 @@ pub async fn transcribe_via_api(
     wav_bytes: &[u8],
     language: &str,
     initial_prompt: Option<&str>,
+    hotwords: Option<&str>,
 ) -> Result<String, AppError> {
     let url = format!(
         "{}/v1/audio/transcriptions",
@@ -316,6 +327,13 @@ pub async fn transcribe_via_api(
 
     if let Some(prompt) = initial_prompt {
         form = form.text("prompt", prompt.to_string());
+    }
+
+    // Speaches and other faster-whisper servers accept `hotwords`. Unlike
+    // `prompt`, which those servers apply to the first 30 seconds only, the
+    // hotwords apply to the whole recording.
+    if let Some(hotwords) = hotwords {
+        form = form.text("hotwords", hotwords.to_string());
     }
 
     let client = reqwest::Client::new();
@@ -375,6 +393,15 @@ mod tests {
     fn prompt_puts_style_first_and_glossary_last() {
         let prompt = build_initial_prompt("Hello there.", "kubectl, pnpm").unwrap();
         assert_eq!(prompt, "Hello there. Glossary: kubectl, pnpm.");
+    }
+
+    #[test]
+    fn glossary_terms_are_one_clean_line() {
+        assert_eq!(
+            glossary_terms("kubectl,\n pnpm ,, Node.js\n").as_deref(),
+            Some("kubectl, pnpm, Node.js")
+        );
+        assert_eq!(glossary_terms(" , \n "), None);
     }
 
     #[test]

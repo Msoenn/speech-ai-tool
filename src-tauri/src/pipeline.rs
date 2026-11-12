@@ -63,7 +63,11 @@ pub async fn run_pipeline(app: AppHandle) -> Result<(), AppError> {
     // 2. Transcribe
     let settings = state.settings.lock().unwrap().clone();
 
+    // `initial_prompt` is the full text (style example + glossary). Local mode
+    // sends it as is, and the echo check below compares against it. API mode
+    // can send the glossary as hotwords instead.
     let initial_prompt = settings.whisper_initial_prompt();
+    let (api_prompt, api_hotwords) = settings.whisper_api_prompt_parts();
 
     let raw_text = match settings.whisper_mode {
         WhisperMode::Local => state.whisper.transcribe(
@@ -78,10 +82,25 @@ pub async fn run_pipeline(app: AppHandle) -> Result<(), AppError> {
                 &settings.whisper_api_model,
                 &wav_bytes,
                 &settings.whisper_language,
-                initial_prompt.as_deref(),
+                api_prompt.as_deref(),
+                api_hotwords.as_deref(),
             )
             .await?
         }
+    };
+
+    // Whisper sometimes gets stuck and repeats one phrase many times, most
+    // often over silence at the end. Keep one copy of the phrase.
+    let raw_text = {
+        let collapsed = crate::repetition::collapse_repetition_loops(&raw_text);
+        if collapsed.len() < raw_text.len() {
+            eprintln!(
+                "Removed a Whisper repetition loop ({} -> {} chars)",
+                raw_text.len(),
+                collapsed.len()
+            );
+        }
+        collapsed
     };
 
     // On silence, Whisper sometimes outputs the prompt text itself. Treat that

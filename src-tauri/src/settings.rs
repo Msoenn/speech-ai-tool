@@ -14,6 +14,10 @@ pub struct AppSettings {
     pub whisper_api_key: String,
     #[serde(default = "default_whisper_api_model")]
     pub whisper_api_model: String,
+    /// API mode only: send the glossary in the `hotwords` field (Speaches and
+    /// other faster-whisper servers) and not inside the prompt.
+    #[serde(default)]
+    pub whisper_api_hotwords: bool,
     /// Style example for the Whisper prompt (see whisper::build_initial_prompt).
     #[serde(default = "crate::whisper::default_style_example")]
     pub whisper_style_example: String,
@@ -91,6 +95,25 @@ impl AppSettings {
     }
 }
 
+impl AppSettings {
+    /// What API mode sends, as (prompt, hotwords).
+    ///
+    /// By default the glossary is part of the prompt. If the user turned on
+    /// hotwords, the prompt holds only the style example and the glossary
+    /// goes in the `hotwords` field, which a faster-whisper server applies to
+    /// the whole recording.
+    pub fn whisper_api_prompt_parts(&self) -> (Option<String>, Option<String>) {
+        if self.whisper_api_hotwords {
+            (
+                crate::whisper::build_initial_prompt(&self.whisper_style_example, ""),
+                crate::whisper::glossary_terms(&self.whisper_glossary),
+            )
+        } else {
+            (self.whisper_initial_prompt(), None)
+        }
+    }
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -106,6 +129,7 @@ impl Default for AppSettings {
             whisper_api_endpoint: String::new(),
             whisper_api_key: String::new(),
             whisper_api_model: default_whisper_api_model(),
+            whisper_api_hotwords: false,
             whisper_style_example: crate::whisper::default_style_example(),
             whisper_glossary: crate::whisper::default_glossary(),
             llm: LlmConfig::default(),
@@ -180,6 +204,33 @@ mod tests {
         assert!(settings.llm_cleanup_enabled);
         assert_eq!(settings.whisper_glossary, crate::whisper::DEFAULT_GLOSSARY);
         assert_eq!(settings.whisper_style_example, crate::whisper::DEFAULT_STYLE_EXAMPLE);
+    }
+
+    #[test]
+    fn api_mode_sends_the_glossary_inside_the_prompt_by_default() {
+        let settings = AppSettings {
+            whisper_style_example: "Hello there.".into(),
+            whisper_glossary: "kubectl, pnpm".into(),
+            ..AppSettings::default()
+        };
+        assert_eq!(
+            settings.whisper_api_prompt_parts(),
+            (Some("Hello there. Glossary: kubectl, pnpm.".into()), None)
+        );
+    }
+
+    #[test]
+    fn api_mode_with_hotwords_splits_style_and_glossary() {
+        let settings = AppSettings {
+            whisper_style_example: "Hello there.".into(),
+            whisper_glossary: "kubectl,\npnpm".into(),
+            whisper_api_hotwords: true,
+            ..AppSettings::default()
+        };
+        assert_eq!(
+            settings.whisper_api_prompt_parts(),
+            (Some("Hello there.".into()), Some("kubectl, pnpm".into()))
+        );
     }
 
     #[test]

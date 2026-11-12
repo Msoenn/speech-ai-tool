@@ -11,6 +11,7 @@ mod macos_microphone;
 mod llm;
 mod output;
 mod pipeline;
+mod repetition;
 mod settings;
 mod sounds;
 mod tray;
