@@ -127,24 +127,6 @@ export default function WhisperSettings({ settings, onChange }: WhisperSettingsP
               installed (e.g. <code>Systran/faster-whisper-large-v3</code>).
             </p>
           </div>
-          <div>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.whisper_api_vad_filter ?? false}
-                onChange={(e) =>
-                  onChange({ ...settings, whisper_api_vad_filter: e.target.checked })
-                }
-                className="accent-accent"
-              />
-              <span className="text-sm text-text">Remove silence before transcription</span>
-            </label>
-            <p className="text-xs text-text-muted mt-1">
-              Sends <code>vad_filter=true</code>. Speaches and other faster-whisper servers
-              support it. It stops made-up text and repeated phrases over silence. Leave it
-              off for the OpenAI API.
-            </p>
-          </div>
         </div>
       )}
 

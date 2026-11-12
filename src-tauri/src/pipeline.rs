@@ -79,7 +79,6 @@ pub async fn run_pipeline(app: AppHandle) -> Result<(), AppError> {
                 &wav_bytes,
                 &settings.whisper_language,
                 initial_prompt.as_deref(),
-                settings.whisper_api_vad_filter,
             )
             .await?
         }
